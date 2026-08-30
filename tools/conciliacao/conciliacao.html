@@ -1,0 +1,188 @@
+<!-- ConfereAI — Ferramenta: Conciliação Bancária -->
+
+<div class="tool-conciliacao">
+
+  <!-- UPLOAD -->
+  <div class="section-head">
+    <h2>1. Importar arquivos</h2>
+  </div>
+
+  <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Enviar arquivos para conciliação">
+    <div class="dz-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h3>Arraste os arquivos aqui</h3>
+    <p>ou <span class="browse">clique para selecionar</span> — envie 2 arquivos: Caixa + Cielo, ou Caixa + PIX. O tipo é detectado automaticamente.</p>
+    <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
+  </div>
+
+  <div class="file-slots">
+    <div class="file-slot caixa empty" id="slot-caixa">
+      <div class="fs-icon">PDF</div>
+      <div class="fs-body">
+        <div class="fs-label">Relatório de Caixa</div>
+        <div class="fs-name">Nenhum arquivo</div>
+        <div class="fs-status">Aguardando envio</div>
+      </div>
+      <button class="fs-remove" data-slot="caixa" title="Remover" style="display:none;">✕</button>
+    </div>
+    <div class="file-slot sicredi empty" id="slot-sicredi">
+      <div class="fs-icon">XLS</div>
+      <div class="fs-body">
+        <div class="fs-label">Extrato Sicredi (PIX)</div>
+        <div class="fs-name">Nenhum arquivo</div>
+        <div class="fs-status">Aguardando envio</div>
+      </div>
+      <button class="fs-remove" data-slot="sicredi" title="Remover" style="display:none;">✕</button>
+    </div>
+    <div class="file-slot cielo empty" id="slot-cielo">
+      <div class="fs-icon">XLSX</div>
+      <div class="fs-body">
+        <div class="fs-label">Relatório Cielo</div>
+        <div class="fs-name">Nenhum arquivo</div>
+        <div class="fs-status">Aguardando envio</div>
+      </div>
+      <button class="fs-remove" data-slot="cielo" title="Remover" style="display:none;">✕</button>
+    </div>
+  </div>
+
+  <div class="actions-row">
+    <button class="btn btn-primary" id="btnProcess" disabled>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Processar conciliação
+    </button>
+    <button class="btn btn-ghost" id="btnExport" disabled>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      Exportar divergências (.xlsx)
+    </button>
+    <button class="btn btn-danger-ghost" id="btnReset">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 4v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Limpar / Nova conciliação
+    </button>
+    <span class="hint-msg" id="processHint">Envie o relatório de Caixa e um relatório Cielo ou extrato PIX.</span>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="results-wrap" id="resultsWrap">
+
+    <div class="section-head">
+      <h2>2. Visão geral</h2>
+      <span class="sub" id="lastRunLabel"></span>
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card">
+        <div class="m-label">Total Caixa</div>
+        <div class="m-value" id="mCaixa">R$ 0,00</div>
+        <div class="m-sub" id="mCaixaSub">0 lançamentos</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-label">Total Sicredi</div>
+        <div class="m-value" id="mSicredi">R$ 0,00</div>
+        <div class="m-sub" id="mSicrediSub">0 lançamentos</div>
+      </div>
+      <div class="metric-card">
+        <div class="m-label">Total Cielo</div>
+        <div class="m-value" id="mCielo">R$ 0,00</div>
+        <div class="m-sub" id="mCieloSub">0 lançamentos</div>
+      </div>
+      <div class="metric-card status">
+        <div class="m-label">Status geral</div>
+        <div class="m-value"><span class="status-badge idle" id="mStatus">—</span></div>
+        <div class="m-sub" id="mStatusSub">Nenhum processamento ainda</div>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>3. Totais comparados</h2>
+      <span class="sub">Caixa × Cielo ou Extrato PIX</span>
+    </div>
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Modalidade</th>
+            <th class="num">Caixa (R$)</th>
+            <th class="num">Banco/Adquirente (R$)</th>
+            <th class="num">Diferença (R$)</th>
+            <th class="num">Lote batido</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-head">
+      <h2>4. Divergências</h2>
+      <span class="sub">Somente vendas sem correspondência por data e valor</span>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Detalhamento das divergências</h3>
+        <span class="count" id="divCount">0 itens</span>
+      </div>
+      <div class="legend" style="padding:12px 18px 0;">
+        <span><span class="sw" style="background:var(--red)"></span> Ausente no banco/adquirente</span>
+        <span><span class="sw" style="background:var(--amber)"></span> Valor divergente</span>
+        <span><span class="sw" style="background:var(--sky)"></span> Sobra no banco/adquirente</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Modalidade</th>
+              <th>Data</th>
+              <th>Hora</th>
+              <th>Documento</th>
+              <th class="num">Valor Caixa</th>
+              <th class="num">Valor Banco</th>
+              <th>Origem banco</th>
+            </tr>
+          </thead>
+          <tbody id="divergenceBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state ok" id="divEmpty" style="display:none;">
+        <div class="es-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h4>Tudo conciliado</h4>
+        <p>Nenhuma divergência encontrada entre caixa, Sicredi e Cielo.</p>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>5. Lançamentos lidos para comparação</h2>
+      <span class="sub">Lado A e Lado B — somente na sua tela, nada é enviado</span>
+    </div>
+    <div class="panel">
+      <div class="panel-head" style="gap:10px; display:flex; align-items:center;">
+        <h3 style="flex:1;">Comparação linha a linha</h3>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-export" id="btnExportCompare" style="padding: 6px 10px; font-size: 12px; display: none;" title="Exportar comparação (.xlsx)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="btn btn-ghost" id="btnPrevDivergence" style="padding: 6px 10px; font-size: 12px; display: none;" title="Divergência anterior">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+          <button class="btn btn-ghost" id="btnNextDivergence" style="padding: 6px 10px; font-size: 12px; display: none;" title="Próxima divergência">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+          </button>
+        </div>
+        <span class="count" id="sourceCompareCount">0 pares</span>
+      </div>
+      <div class="source-note" id="sourceBNote">Valores iguais, na mesma data, ficam alinhados na mesma linha.</div>
+      <div class="source-compare" id="sourceCompareScroll"><table>
+        <thead>
+          <tr><th colspan="6" class="group-a">A · Caixa (PDF)</th><th colspan="6" class="group-b side-divider" id="sourceBTitle">B · Arquivo comparativo</th></tr>
+          <tr><th>#</th><th>Data</th><th>Hora</th><th>Documento</th><th class="num">Valor</th><th>Linha lida</th><th class="side-divider">#</th><th>Data</th><th>Hora</th><th>Documento</th><th class="num">Valor</th><th>Descrição / linha lida</th></tr>
+        </thead>
+        <tbody id="sourceCompareBody"></tbody>
+      </table></div>
+    </div>
+
+  </div>
+
+</div>

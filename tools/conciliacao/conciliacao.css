@@ -1,0 +1,99 @@
+/* =========================================================================
+   ConfereAI — Conciliação Bancária: Estilos Específicos
+   Todos os seletores usam .tool-conciliacao para isolamento.
+   ========================================================================= */
+
+/* ---------- DROPZONE ---------- */
+.tool-conciliacao .dropzone{
+  border:1.5px dashed var(--gray-200);
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 30px 24px;
+  text-align:center;
+  cursor:pointer;
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+  box-shadow: var(--shadow);
+}
+.tool-conciliacao .dropzone.drag{ border-color: var(--blue-500); background: var(--sky-bg); }
+.tool-conciliacao .dropzone .dz-icon{
+  width:46px; height:46px; margin:0 auto 12px; border-radius:12px;
+  background: var(--sky-bg); color: var(--blue-500);
+  display:flex; align-items:center; justify-content:center;
+}
+.tool-conciliacao .dropzone h3{ margin:0 0 4px; font-size:14.5px; font-weight:700; color: var(--navy-900);}
+.tool-conciliacao .dropzone p{ margin:0; font-size:12.5px; color: var(--gray-500); }
+.tool-conciliacao .dropzone .browse{ color: var(--blue-500); font-weight:600; text-decoration:underline; text-underline-offset:2px;}
+
+/* ---------- FILE SLOTS ---------- */
+.tool-conciliacao .file-slots{ display:grid; grid-template-columns: repeat(3, 1fr); gap:14px; margin-top:16px;}
+@media (max-width: 860px){ .tool-conciliacao .file-slots{ grid-template-columns: 1fr; } }
+
+.tool-conciliacao .file-slot{
+  background:var(--card-bg); border:1px solid var(--gray-100); border-radius: var(--radius);
+  padding:14px 16px; display:flex; align-items:flex-start; gap:12px;
+  box-shadow: var(--shadow);
+  position:relative;
+}
+.tool-conciliacao .file-slot .fs-icon{
+  width:36px; height:36px; border-radius:9px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px;
+}
+.tool-conciliacao .file-slot.caixa .fs-icon{ background:#ffe9e5; color:#c2410c;}
+.tool-conciliacao .file-slot.sicredi .fs-icon{ background:#e6f4ea; color:#0c7a3d;}
+.tool-conciliacao .file-slot.cielo .fs-icon{ background:var(--sky-bg); color:var(--blue-500);}
+.tool-conciliacao .file-slot .fs-body{ min-width:0; flex:1; }
+.tool-conciliacao .file-slot .fs-label{ font-size:11px; text-transform:uppercase; letter-spacing:.4px; font-weight:700; color:var(--gray-500);}
+.tool-conciliacao .file-slot .fs-name{ font-size:13px; font-weight:600; color:var(--ink); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.tool-conciliacao .file-slot .fs-status{ font-size:11.5px; margin-top:3px; color:var(--gray-400); font-weight:500;}
+.tool-conciliacao .file-slot.filled .fs-status{ color: var(--green); }
+.tool-conciliacao .file-slot .fs-remove{
+  border:none; background:transparent; color:var(--gray-400); cursor:pointer; font-size:16px;
+  line-height:1; padding:2px 4px; border-radius:6px; flex-shrink:0;
+}
+.tool-conciliacao .file-slot .fs-remove:hover{ background:var(--red-bg); color:var(--red); }
+.tool-conciliacao .file-slot.empty .fs-name{ color:var(--gray-400); font-weight:500;}
+
+/* ---------- ACTIONS ---------- */
+.tool-conciliacao .actions-row{ display:flex; align-items:center; gap:10px; margin-top:18px; flex-wrap:wrap;}
+
+/* ---------- RESULTS ---------- */
+.tool-conciliacao .results-wrap{ display:none; }
+.tool-conciliacao .results-wrap.show{ display:block; }
+
+/* ---------- DIFF COLORS ---------- */
+.tool-conciliacao .diff-pos{ color:var(--green); font-weight:600;}
+.tool-conciliacao .diff-neg{ color:var(--red); font-weight:600;}
+.tool-conciliacao .diff-zero{ color:var(--gray-400); }
+
+/* ---------- LEGEND ---------- */
+.tool-conciliacao .legend{ display:flex; gap:16px; flex-wrap:wrap; margin-top:2px;}
+.tool-conciliacao .legend span{ font-size:12px; color:var(--gray-500); display:flex; align-items:center; gap:6px; font-weight:500;}
+.tool-conciliacao .legend .sw{ width:9px; height:9px; border-radius:3px; }
+
+/* ---------- SOURCE COMPARE ---------- */
+.tool-conciliacao .source-compare{ max-height:460px; overflow:auto; }
+.tool-conciliacao .source-compare table{ min-width:1100px; }
+.tool-conciliacao .source-compare thead th{ position:sticky; z-index:2; }
+.tool-conciliacao .source-compare thead tr:first-child th{ top:0; z-index:3; }
+.tool-conciliacao .source-compare thead tr:nth-child(2) th{ top:41px; text-align:center; }
+.tool-conciliacao .source-note{ padding:10px 16px; color:var(--gray-500); font-size:11.5px; border-bottom:1px solid var(--gray-100); }
+.tool-conciliacao .source-compare .group-a{ background:#f1f6ff; color:var(--blue-500); }
+.tool-conciliacao .source-compare .group-b{ background:#eefaf2; color:var(--green); }
+.tool-conciliacao .source-compare .side-divider{ border-left:3px solid var(--gray-200); }
+.tool-conciliacao .source-compare .missing-side{ color:var(--gray-400); text-align:center; }
+
+/* Dark mode adjustments for source compare */
+[data-theme="dark"] .tool-conciliacao .source-compare .group-a{ background:rgba(0,86,255,.1); }
+[data-theme="dark"] .tool-conciliacao .source-compare .group-b{ background:rgba(22,163,74,.1); }
+
+/* ---------- DEBUG ---------- */
+.tool-conciliacao details.debug-panel{ margin-top:16px; background:var(--card-bg); border:1px solid var(--gray-100); border-radius: var(--radius); box-shadow: var(--shadow); overflow:hidden;}
+.tool-conciliacao details.debug-panel summary{ cursor:pointer; padding:14px 18px; font-size:13px; font-weight:700; color:var(--navy-900); list-style:none; display:flex; align-items:center; justify-content:space-between;}
+.tool-conciliacao details.debug-panel summary::-webkit-details-marker{ display:none; }
+.tool-conciliacao details.debug-panel summary .dbg-hint{ font-size:11.5px; font-weight:500; color:var(--gray-500);}
+.tool-conciliacao .debug-body{ border-top:1px solid var(--gray-100); max-height:340px; overflow:auto; }
+.tool-conciliacao .debug-body table{ font-size:12px; }
+.tool-conciliacao .debug-body td.raw{ font-family:var(--mono); font-size:11.5px; color:var(--gray-700); white-space:nowrap; max-width:520px; overflow:hidden; text-overflow:ellipsis;}
+.tool-conciliacao .mod-tag{ font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:100px; }
+.tool-conciliacao .mod-tag.ok{ background:var(--green-bg); color:var(--green); }
+.tool-conciliacao .mod-tag.warn{ background:var(--gray-100); color:var(--gray-500); }
