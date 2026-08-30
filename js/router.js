@@ -49,7 +49,7 @@ const Router = (function(){
       currentTool = toolId;
 
       // Paths
-      const basePath = `tools/${toolId}/${toolId}`;
+      const basePath = `ferramentas/${toolId}/${toolId}`;
       const htmlPath = `${basePath}.html`;
       const cssPath = `${basePath}.css`;
       const jsPath = `${basePath}.js`;
