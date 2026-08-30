@@ -1,6 +1,6 @@
 {
-  "name": "ConfereAI",
-  "short_name": "ConfereAI",
+  "name": "confereai",
+  "short_name": "confereai",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#071427",
