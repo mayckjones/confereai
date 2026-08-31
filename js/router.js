@@ -66,22 +66,29 @@ const Router = (function(){
       container.offsetHeight; // reflow
       container.style.animation = '';
 
-      // 2. Load CSS
-      currentCSS = document.createElement('link');
-      currentCSS.rel = 'stylesheet';
-      currentCSS.href = cssPath;
-      document.head.appendChild(currentCSS);
+      // 2. Load CSS (wait for it)
+      await new Promise((resolve) => {
+        currentCSS = document.createElement('link');
+        currentCSS.rel = 'stylesheet';
+        currentCSS.href = cssPath;
+        currentCSS.onload = resolve;
+        currentCSS.onerror = resolve; // Continue even if CSS fails
+        document.head.appendChild(currentCSS);
+      });
 
-      // 3. Load JS
-      currentJS = document.createElement('script');
-      currentJS.src = jsPath;
-      currentJS.onload = () => {
-        // Se a ferramenta exportar uma função de init, executamos
-        if(window['__tool_init_' + toolId]){
-          window['__tool_init_' + toolId]();
-        }
-      };
-      document.body.appendChild(currentJS);
+      // 3. Load JS (wait for it)
+      await new Promise((resolve) => {
+        currentJS = document.createElement('script');
+        currentJS.src = jsPath;
+        currentJS.onload = () => {
+          if (window['__tool_init_' + toolId]) {
+            window['__tool_init_' + toolId]();
+          }
+          resolve();
+        };
+        currentJS.onerror = resolve;
+        document.body.appendChild(currentJS);
+      });
 
       updateNavActive(toolId);
     } catch (err) {
