@@ -47,6 +47,7 @@ const Router = (function(){
       }
 
       currentTool = toolId;
+      container.innerHTML = ''; // Limpa a tela antiga imediatamente
 
       // Paths
       const basePath = `ferramentas/${toolId}/${toolId}`;
