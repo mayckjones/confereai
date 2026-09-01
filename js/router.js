@@ -55,16 +55,10 @@ const Router = (function(){
       const cssPath = `${basePath}.css`;
       const jsPath = `${basePath}.js`;
 
-      // 1. Fetch HTML
+      // 1. Fetch HTML (não injeta ainda)
       const response = await fetch(htmlPath);
       if(!response.ok) throw new Error('Ferramenta não encontrada');
       const html = await response.text();
-      container.innerHTML = html;
-
-      // Trigger fade-in animation
-      container.style.animation = 'none';
-      container.offsetHeight; // reflow
-      container.style.animation = '';
 
       // 2. Load CSS (wait for it)
       await new Promise((resolve) => {
@@ -75,6 +69,14 @@ const Router = (function(){
         currentCSS.onerror = resolve; // Continue even if CSS fails
         document.head.appendChild(currentCSS);
       });
+
+      // Agora sim injetamos o HTML, com o CSS já pronto!
+      container.innerHTML = html;
+
+      // Trigger fade-in animation
+      container.style.animation = 'none';
+      container.offsetHeight; // reflow
+      container.style.animation = '';
 
       // 3. Load JS (wait for it)
       await new Promise((resolve) => {
