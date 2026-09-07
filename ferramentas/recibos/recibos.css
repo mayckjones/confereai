@@ -643,12 +643,12 @@
   letter-spacing: 0.2px;
 }
 
-/* Moldura Arredondada Fiel ao Modelo Anexado */
+/* Moldura Arredondada Fiel ao Modelo Anexado (Visualização Prévia em Tela) */
 .tool-recibos .ws-card-frame {
   width: 100%;
   border: 2px solid #262626;
-  border-radius: 60px;
-  padding: 42px 38px 48px;
+  border-radius: 46px;
+  padding: 34px 30px 38px;
   position: relative;
   background: #ffffff;
   box-sizing: border-box;
@@ -657,15 +657,20 @@
 /* Logotipo da Farmácia no Canto Superior Esquerdo da Moldura */
 .tool-recibos .ws-logo-container {
   position: absolute;
-  top: 24px;
-  left: 28px;
+  top: 20px;
+  left: 22px;
+}
+
+.tool-recibos .ws-logo-container img {
+  width: 46px !important;
+  height: 46px !important;
 }
 
 .tool-recibos .ws-logo-badge {
   background: #d82b27;
   color: #ffffff;
-  width: 54px;
-  height: 54px;
+  width: 46px;
+  height: 46px;
   border-radius: 3px;
   display: flex;
   flex-direction: column;
@@ -677,8 +682,8 @@
 }
 
 .tool-recibos .ws-logo-heart {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   fill: #ffffff;
   margin-bottom: 2px;
 }
@@ -698,22 +703,22 @@
 
 /* Título RECIBO */
 .tool-recibos .ws-title {
-  font-size: 32px;
+  font-size: 24px;
   font-weight: 800;
   text-align: center;
   color: #111111;
-  margin: 28px 0 32px 0;
-  letter-spacing: 1px;
+  margin: 18px 0 22px 0;
+  letter-spacing: 0.8px;
 }
 
 /* Destaque do Valor */
 .tool-recibos .ws-valor-row {
   text-align: right;
-  font-size: 23px;
+  font-size: 17px;
   font-weight: 800;
   color: #111111;
-  margin-bottom: 28px;
-  padding-right: 6px;
+  margin-bottom: 22px;
+  padding-right: 4px;
 }
 
 .tool-recibos .ws-valor-num {
@@ -722,11 +727,11 @@
 
 /* Corpo do Recibo */
 .tool-recibos .ws-body-text {
-  font-size: 17px;
-  line-height: 1.8;
+  font-size: 13.5px;
+  line-height: 1.75;
   color: #111111;
   text-align: justify;
-  margin-bottom: 44px;
+  margin-bottom: 34px;
   word-break: break-word;
 }
 
@@ -737,28 +742,28 @@
 /* Assinatura */
 .tool-recibos .ws-signature-box {
   text-align: center;
-  margin: 46px auto 30px;
-  max-width: 520px;
+  margin: 36px auto 22px;
+  max-width: 440px;
 }
 
 .tool-recibos .ws-signature-line {
-  font-size: 16px;
+  font-size: 13px;
   color: #222222;
   letter-spacing: -0.5px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   white-space: nowrap;
 }
 
 .tool-recibos .ws-sig-name {
-  font-size: 17px;
+  font-size: 13.5px;
   font-weight: 800;
   color: #111111;
   text-transform: uppercase;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
 .tool-recibos .ws-sig-cpf {
-  font-size: 15.5px;
+  font-size: 12.5px;
   font-weight: 700;
   color: #111111;
   font-family: inherit;
@@ -767,9 +772,9 @@
 /* Data de Emissão no Rodapé */
 .tool-recibos .ws-date-footer {
   text-align: center;
-  font-size: 15.5px;
+  font-size: 12.5px;
   color: #222222;
-  margin-top: 30px;
+  margin-top: 24px;
   font-weight: 500;
 }
 
