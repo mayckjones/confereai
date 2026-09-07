@@ -543,6 +543,12 @@ td.mono {
   display: flex;
 }
 
+/* Esconde o conteúdo da página enquanto o overlay de carregamento está ativo */
+.overlay.show ~ * #app-content,
+body:has(.overlay.show) #app-content {
+  visibility: hidden;
+}
+
 .loader-card {
   background: var(--loader-bg);
   border-radius: 16px;
