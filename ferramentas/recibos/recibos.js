@@ -7,25 +7,6 @@
 window.__tool_init_recibos = function() {
   'use strict';
 
-  // --- DADOS DE EXEMPLO BASEADOS NA PLANILHA FORNECIDA ---
-  const SAMPLE_ITEMS = [
-    { vendedor: 'BRUNA PAULINO', cpf: '095.262.254-81', valor: 100.00, data: '06/09/2026', loja: '4', cnpj: '24.920.850.0001-76' },
-    { vendedor: 'BRUNO RAFAEL LOPES DA SILVA', cpf: '100.143.244-40', valor: 100.00, data: '06/09/2026', loja: '2', cnpj: '13.286.582/0001-66' },
-    { vendedor: 'CELIO JOSE DOS SANTOS', cpf: '033.313.484-22', valor: 100.00, data: '06/09/2026', loja: '4', cnpj: '24.920.850.0001-76' },
-    { vendedor: 'DARLENE DOS SANTOS', cpf: '047.685.504-79', valor: 100.00, data: '06/09/2026', loja: '1', cnpj: '11.719.336/0001-25' },
-    { vendedor: 'DARLENE DOS SANTOS', cpf: '047.685.504-79', valor: 100.00, data: '07/09/2026', loja: '2', cnpj: '13.286.582/0001-66' },
-    { vendedor: 'ELLEN CRISTINA ARAUJO DA SILVA', cpf: '079.625.134-70', valor: 90.00, data: '05/09/2026', loja: '3', cnpj: '15.045.542/0001-58' },
-    { vendedor: 'ELLEN CRISTINA ARAUJO DA SILVA', cpf: '079.625.134-70', valor: 100.00, data: '07/09/2026', loja: '3', cnpj: '15.045.542/0001-58' },
-    { vendedor: 'IRAMAI LAMBERT', cpf: '072.865.194-76', valor: 100.00, data: '06/09/2026', loja: '3', cnpj: '15.045.542/0001-58' },
-    { vendedor: 'IRAMAI LAMBERT', cpf: '072.865.194-76', valor: 100.00, data: '07/09/2026', loja: '1', cnpj: '11.719.336/0001-25' },
-    { vendedor: 'MANOEL CARLOS GOMES FILHO', cpf: '023.533.984-99', valor: 100.00, data: '06/09/2026', loja: '5', cnpj: '24.920.850/0002-57' },
-    { vendedor: 'MARCONI ALVES DA SILVA', cpf: '090.454.294-70', valor: 100.00, data: '06/09/2026', loja: '3', cnpj: '15.045.542/0001-58' },
-    { vendedor: 'THAYSE VALDEVINO', cpf: '108.617.924-24', valor: 100.00, data: '07/09/2026', loja: '2', cnpj: '13.286.582/0001-66' },
-    { vendedor: 'WILLIAN RONI DE SOUZA OLIVEIRA', cpf: '128.789.864-58', valor: 100.00, data: '06/09/2026', loja: '1', cnpj: '11.719.336/0001-25' },
-    { vendedor: 'WILLIAN RONI DE SOUZA OLIVEIRA', cpf: '128.789.864-58', valor: 100.00, data: '07/09/2026', loja: '2', cnpj: '13.286.582/0001-66' },
-    { vendedor: 'YURI MEIRELES DA SILVA', cpf: '117.263.714-84', valor: 100.00, data: '07/09/2026', loja: '5', cnpj: '24.920.850/0002-57' }
-  ];
-
   // Função para obter cidade e data atual por extenso automaticamente
   function obterDataAtualPorExtenso(cidade = 'Maceió') {
     const meses = [
@@ -56,10 +37,7 @@ window.__tool_init_recibos = function() {
   const fileCard = document.getElementById('reciboFileCard');
   const fileName = document.getElementById('reciboFileName');
   const fileMeta = document.getElementById('reciboFileMeta');
-  const demoBanner = document.getElementById('demoBanner');
-  const btnLoadSampleData = document.getElementById('btnLoadSampleData');
   const btnRemoverArquivo = document.getElementById('btnRemoverArquivo');
-  const btnCarregarExemplo = document.getElementById('btnCarregarExemplo');
 
   const workspace = document.getElementById('recibosWorkspace');
   const totalRecibosBadge = document.getElementById('totalRecibosBadge');
@@ -280,10 +258,9 @@ window.__tool_init_recibos = function() {
 
     // Atualiza status do arquivo
     dropzone.style.display = 'none';
-    demoBanner.style.display = 'none';
     fileCard.style.display = 'flex';
     fileName.textContent = nomeFonte || 'Planilha_de_Pagamentos.xlsx';
-    fileMeta.textContent = `${recibosList.length} recibos processados • Todas as datas no padrão DD/MM/AAAA`;
+    fileMeta.textContent = `${recibosList.length} recibos processados`;
 
     workspace.style.display = 'block';
 
@@ -300,7 +277,7 @@ window.__tool_init_recibos = function() {
     const total = recibosList.length;
     const soma = recibosList.reduce((acc, r) => acc + (Number(r.valor) || 0), 0);
     totalRecibosBadge.textContent = `${total} ${total === 1 ? 'Recibo Gerado' : 'Recibos Gerados'}`;
-    totalValorBadge.textContent = `Total: R$ ${formatarMoeda(soma)} • Formato estrito Dia/Mês/Ano`;
+    totalValorBadge.textContent = `Total: R$ ${formatarMoeda(soma)}`;
     tabCount.textContent = total;
   }
 
@@ -716,20 +693,11 @@ window.__tool_init_recibos = function() {
     }
   });
 
-  btnLoadSampleData.addEventListener('click', () => {
-    carregarRecibos(SAMPLE_ITEMS, 'Planilha_Exemplo_Farmacia.xlsx');
-  });
-
-  btnCarregarExemplo.addEventListener('click', () => {
-    carregarRecibos(SAMPLE_ITEMS, 'Planilha_Exemplo_Farmacia.xlsx');
-  });
-
   btnRemoverArquivo.addEventListener('click', () => {
     recibosList = [];
     workspace.style.display = 'none';
     fileCard.style.display = 'none';
     dropzone.style.display = 'block';
-    demoBanner.style.display = 'flex';
     fileInput.value = '';
     showToast('Planilha removida.');
   });

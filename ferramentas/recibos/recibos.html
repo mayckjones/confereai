@@ -5,7 +5,6 @@
   <!-- ETAPA 1: IMPORTAÇÃO E REGRAS -->
   <div class="section-head">
     <h2>1. Importar Planilha de Pagamentos</h2>
-    <span class="sub">Envie a planilha contendo VENDEDOR, CPF, VALOR, DATA, LOJA e CNPJ (.xlsx, .xls ou .csv)</span>
   </div>
 
   <div class="recibos-upload-container">
@@ -27,20 +26,10 @@
         <div class="rfc-name" id="reciboFileName">planilha.xlsx</div>
         <div class="rfc-meta" id="reciboFileMeta">0 registros encontrados • Validação ortográfica ativa</div>
       </div>
-      <button class="btn btn-ghost btn-sm" id="btnCarregarExemplo" title="Preencher com dados de exemplo da farmácia">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        Recarregar
-      </button>
       <button class="btn btn-danger-ghost btn-sm" id="btnRemoverArquivo">
         Remover
       </button>
     </div>
-  </div>
-
-  <!-- Botão rápido para carregar o modelo de exemplo -->
-  <div class="quick-demo-banner" id="demoBanner">
-    <span>💡 Deseja testar imediatamente com os 15 lançamentos da <strong>Farmácia do Trabalhador</strong>?</span>
-    <button class="btn btn-sm btn-ghost" id="btnLoadSampleData">Carregar Dados de Exemplo</button>
   </div>
 
   <!-- ÁREA DE REVISÃO E TRABALHO (EXIBIDA APÓS IMPORTAR) -->
@@ -49,8 +38,8 @@
     <!-- BARRA DE AÇÕES PRINCIPAIS -->
     <div class="actions-bar-card">
       <div class="abc-info">
-        <div class="abc-badge" id="totalRecibosBadge">15 Recibos Gerados</div>
-        <div class="abc-sub" id="totalValorBadge">Total: R$ 1.490,00 • Formato de datas estritamente DD/MM/AAAA</div>
+        <div class="abc-badge" id="totalRecibosBadge">0 Recibos Gerados</div>
+        <div class="abc-sub" id="totalValorBadge">Total: R$ 0,00</div>
       </div>
       <div class="abc-actions">
         <button class="btn btn-outline" id="btnToggleMestre">
@@ -195,7 +184,6 @@
               <div class="form-group flex-1">
                 <label>Data do Serviço (DD/MM/AAAA)</label>
                 <input type="text" id="editData" class="form-control font-mono" placeholder="06/09/2026">
-                <small class="form-hint text-success">✓ Formato estrito Dia/Mês/Ano</small>
               </div>
               <div class="form-group flex-1">
                 <label>CNPJ da Loja/Filial</label>
@@ -262,7 +250,7 @@
         <div class="preview-header">
           <div class="preview-label">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Visualização Prévia em Tempo Real (Fiel ao Modelo PDF)
+            Visualização Prévia em Tempo Real
           </div>
           <div class="preview-scale-controls">
             <span class="preview-tag">Folha A4 PDF</span>

@@ -66,29 +66,6 @@
   text-underline-offset: 2px;
 }
 
-/* Banner de teste rápido */
-.tool-recibos .quick-demo-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding: 10px 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--gray-100);
-  border-radius: var(--radius);
-  font-size: 12.5px;
-  color: var(--gray-700);
-  box-shadow: var(--shadow);
-}
-
-@media (max-width: 600px) {
-  .tool-recibos .quick-demo-banner {
-    flex-direction: column;
-    gap: 8px;
-    align-items: flex-start;
-  }
-}
-
 /* Card do Arquivo Carregado */
 .tool-recibos .recibo-file-card {
   display: flex;
@@ -774,7 +751,6 @@
   .signature,
   .section-head,
   .recibos-upload-container,
-  .quick-demo-banner,
   .actions-bar-card,
   .mestre-panel,
   .recibos-editor-col,
