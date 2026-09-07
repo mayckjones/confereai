@@ -849,7 +849,7 @@ window.__tool_init_recibos = function() {
           new TextRun({
             text: "RECIBO",
             bold: true,
-            size: 42, // 21pt
+            size: 48, // 24pt
             color: "111111",
             font: "Calibri"
           })
@@ -866,7 +866,7 @@ window.__tool_init_recibos = function() {
           new TextRun({
             text: `R$ ${valorFmt}`,
             bold: true,
-            size: 28, // 14pt
+            size: 34, // 17pt
             color: "111111",
             font: "Calibri"
           })
@@ -880,20 +880,20 @@ window.__tool_init_recibos = function() {
       new Paragraph({
         alignment: AlignmentType.BOTH,
         children: [
-          new TextRun({ text: "Eu, ", size: 22, font: "Calibri" }),
-          new TextRun({ text: r.vendedor, bold: true, size: 22, font: "Calibri" }),
-          new TextRun({ text: ", inscrito no CPF de número: ", size: 22, font: "Calibri" }),
-          new TextRun({ text: r.cpf, bold: true, size: 22, font: "Calibri" }),
-          new TextRun({ text: ". Recebi da ", size: 22, font: "Calibri" }),
-          new TextRun({ text: r.empresa, size: 22, font: "Calibri" }),
-          new TextRun({ text: ", inscrita no CNPJ: ", size: 22, font: "Calibri" }),
-          new TextRun({ text: r.cnpj, size: 22, font: "Calibri" }),
-          new TextRun({ text: ` A importância de R$ ${valorFmt} (${extensoTexto}). `, size: 22, font: "Calibri" }),
-          new TextRun({ text: `${r.referente} nesta data `, size: 22, font: "Calibri" }),
-          new TextRun({ text: dataFmt, bold: true, size: 22, font: "Calibri" }),
-          new TextRun({ text: ".", size: 22, font: "Calibri" })
+          new TextRun({ text: "Eu, ", size: 26, font: "Calibri" }),
+          new TextRun({ text: r.vendedor, bold: true, size: 26, font: "Calibri" }),
+          new TextRun({ text: ", inscrito no CPF de número: ", size: 26, font: "Calibri" }),
+          new TextRun({ text: r.cpf, bold: true, size: 26, font: "Calibri" }),
+          new TextRun({ text: ". Recebi da ", size: 26, font: "Calibri" }),
+          new TextRun({ text: r.empresa, size: 26, font: "Calibri" }),
+          new TextRun({ text: ", inscrita no CNPJ: ", size: 26, font: "Calibri" }),
+          new TextRun({ text: r.cnpj, size: 26, font: "Calibri" }),
+          new TextRun({ text: ` A importância de R$ ${valorFmt} (${extensoTexto}). `, size: 26, font: "Calibri" }),
+          new TextRun({ text: `${r.referente} nesta data `, size: 26, font: "Calibri" }),
+          new TextRun({ text: dataFmt, bold: true, size: 26, font: "Calibri" }),
+          new TextRun({ text: ".", size: 26, font: "Calibri" })
         ],
-        spacing: { line: 360, before: 60, after: 600 }
+        spacing: { line: 400, before: 60, after: 600 }
       })
     );
 
@@ -903,8 +903,8 @@ window.__tool_init_recibos = function() {
         alignment: AlignmentType.CENTER,
         children: [
           new TextRun({
-            text: "_____________________________________",
-            size: 22,
+            text: "_______________________________________________________",
+            size: 26,
             font: "Calibri",
             color: "222222"
           })
@@ -917,7 +917,7 @@ window.__tool_init_recibos = function() {
           new TextRun({
             text: r.vendedor,
             bold: true,
-            size: 22,
+            size: 26,
             font: "Calibri",
             color: "111111"
           })
@@ -930,7 +930,7 @@ window.__tool_init_recibos = function() {
           new TextRun({
             text: r.cpf,
             bold: true,
-            size: 22,
+            size: 24,
             font: "Calibri",
             color: "111111"
           })
@@ -943,7 +943,7 @@ window.__tool_init_recibos = function() {
         children: [
           new TextRun({
             text: r.emissao,
-            size: 21,
+            size: 24,
             font: "Calibri",
             color: "222222"
           })
@@ -1103,23 +1103,23 @@ window.__tool_init_recibos = function() {
       <!-- Moldura do Recibo Centralizada na Folha e Levemente Elevada -->
       <div style="width:100%; border:2px solid #222222; border-radius:60px; padding:44px 38px 48px; position:relative; background:#ffffff; box-sizing:border-box;">
         <div style="position:absolute; top:24px; left:26px;">
-          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpeg'}" alt="Logo" style="width:55px; height:55px; object-fit:contain; border-radius:3px; display:block;">
+          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpeg'}" alt="Logo" style="width:58px; height:58px; object-fit:contain; border-radius:3px; display:block;">
         </div>
-        <h1 style="font-size:27px; font-weight:800; text-align:center; color:#111111; margin:28px 0 32px; letter-spacing:1px;">RECIBO</h1>
-        <div style="text-align:right; font-size:19px; font-weight:800; color:#111111; margin-bottom:26px; padding-right:4px;">
+        <h1 style="font-size:32px; font-weight:800; text-align:center; color:#111111; margin:28px 0 32px; letter-spacing:1px;">RECIBO</h1>
+        <div style="text-align:right; font-size:23px; font-weight:800; color:#111111; margin-bottom:28px; padding-right:4px;">
           R$ ${valorFmt}
         </div>
-        <div style="font-size:14.5px; line-height:1.75; color:#111111; text-align:justify; margin-bottom:44px; word-break:break-word;">
+        <div style="font-size:17px; line-height:1.8; color:#111111; text-align:justify; margin-bottom:44px; word-break:break-word;">
           Eu, <strong>${r.vendedor}</strong>, inscrito no CPF de número: <strong>${r.cpf}</strong>. 
           Recebi da ${r.empresa}, inscrita no CNPJ: ${r.cnpj} A importância de R$ ${valorFmt} 
           (${extensoFmt}). ${r.referente} nesta data <strong>${r.data}</strong>.
         </div>
-        <div style="text-align:center; margin:45px auto 30px; max-width:480px;">
-          <div style="font-size:14px; color:#222222; margin-bottom:10px; letter-spacing:-0.5px; white-space:nowrap;">_______________________________________________________</div>
-          <div style="font-size:14px; font-weight:800; color:#111111; text-transform:uppercase; margin-bottom:4px;">${r.vendedor}</div>
-          <div style="font-size:13.5px; font-weight:700; color:#111111;">${r.cpf}</div>
+        <div style="text-align:center; margin:46px auto 30px; max-width:520px;">
+          <div style="font-size:16px; color:#222222; margin-bottom:12px; letter-spacing:-0.5px; white-space:nowrap;">_______________________________________________________</div>
+          <div style="font-size:17px; font-weight:800; color:#111111; text-transform:uppercase; margin-bottom:5px;">${r.vendedor}</div>
+          <div style="font-size:15.5px; font-weight:700; color:#111111;">${r.cpf}</div>
         </div>
-        <div style="text-align:center; font-size:13.5px; color:#222222; margin-top:28px; font-weight:500;">
+        <div style="text-align:center; font-size:15.5px; color:#222222; margin-top:30px; font-weight:500;">
           ${r.emissao}
         </div>
       </div>
