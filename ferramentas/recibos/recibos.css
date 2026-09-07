@@ -1,0 +1,800 @@
+/* =========================================================================
+   ConfereAI — Gerador de Recibos: Estilos Específicos
+   Design System Integrado, Edição Individual/Mestre e Preview Word A4
+   ========================================================================= */
+
+.tool-recibos {
+  animation: fadeIn .2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- UPLOAD DROPZONE ---------- */
+.tool-recibos .recibos-upload-container {
+  margin-top: 10px;
+}
+
+.tool-recibos .dropzone {
+  border: 1.5px dashed var(--gray-200);
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 34px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+  box-shadow: var(--shadow);
+}
+
+.tool-recibos .dropzone:hover,
+.tool-recibos .dropzone.drag {
+  border-color: var(--blue-500);
+  background: var(--sky-bg);
+}
+
+.tool-recibos .dropzone .dz-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 12px;
+  border-radius: 12px;
+  background: var(--sky-bg);
+  color: var(--blue-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-recibos .dropzone h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--navy-900);
+}
+
+.tool-recibos .dropzone p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+.tool-recibos .dropzone .browse {
+  color: var(--blue-500);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Banner de teste rápido */
+.tool-recibos .quick-demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--gray-700);
+  box-shadow: var(--shadow);
+}
+
+@media (max-width: 600px) {
+  .tool-recibos .quick-demo-banner {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+}
+
+/* Card do Arquivo Carregado */
+.tool-recibos .recibo-file-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  box-shadow: var(--shadow);
+  margin-top: 12px;
+}
+
+.tool-recibos .rfc-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--green-bg);
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-recibos .rfc-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-recibos .rfc-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-recibos .rfc-meta {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-top: 2px;
+}
+
+/* ---------- WORKSPACE ---------- */
+.tool-recibos .recibos-workspace {
+  margin-top: 24px;
+}
+
+/* Barra de Ações do Topo */
+.tool-recibos .actions-bar-card {
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.tool-recibos .abc-badge {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--navy-900);
+}
+
+.tool-recibos .abc-sub {
+  font-size: 12.5px;
+  color: var(--gray-500);
+  margin-top: 3px;
+}
+
+.tool-recibos .abc-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tool-recibos .btn-print-main {
+  background: linear-gradient(135deg, #0056FF 0%, #0040c0 100%);
+  color: #ffffff;
+  border: none;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 9px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 86, 255, 0.3);
+  transition: all .18s ease;
+  font-size: 13.5px;
+}
+
+.tool-recibos .btn-print-main:hover {
+  background: linear-gradient(135deg, #0f62fe 0%, #004adb 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 18px rgba(0, 86, 255, 0.42);
+}
+
+.tool-recibos .btn-print-main:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 86, 255, 0.3);
+}
+
+/* Painel do Recibo Mestre */
+.tool-recibos .mestre-panel {
+  background: var(--card-bg);
+  border: 2px solid var(--blue-500);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 10px 30px -10px rgba(0, 86, 255, 0.2);
+  margin-bottom: 24px;
+  animation: fadeIn .2s ease;
+}
+
+.tool-recibos .mestre-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.tool-recibos .mestre-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--blue-500);
+}
+
+.tool-recibos .btn-close-panel {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.tool-recibos .btn-close-panel:hover {
+  background: var(--gray-100);
+  color: var(--ink);
+}
+
+.tool-recibos .mestre-desc {
+  font-size: 13px;
+  color: var(--gray-500);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.tool-recibos .mestre-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.tool-recibos .mestre-form-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 768px) {
+  .tool-recibos .mestre-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tool-recibos .mestre-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* Layout Duas Colunas: Editor à Esquerda, Preview à Direita */
+.tool-recibos .recibos-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 490px) 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .tool-recibos .recibos-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Coluna de Edição */
+.tool-recibos .recibos-editor-col {
+  min-width: 0;
+  width: 100%;
+}
+
+.tool-recibos .editor-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--gray-200);
+  margin-bottom: 16px;
+  gap: 8px;
+}
+
+.tool-recibos .tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-500);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .15s ease;
+}
+
+.tool-recibos .tab-btn:hover {
+  color: var(--ink);
+}
+
+.tool-recibos .tab-btn.active {
+  color: var(--blue-500);
+  border-bottom-color: var(--blue-500);
+}
+
+/* Paginador de Recibos */
+.tool-recibos .receipt-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.tool-recibos .receipt-nav-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tool-recibos .receipt-nav-counter {
+  font-size: 13px;
+  color: var(--gray-700);
+}
+
+.tool-recibos .receipt-nav-counter strong {
+  color: var(--ink);
+}
+
+.tool-recibos .receipt-nav-select-wrap {
+  width: 100%;
+}
+
+.tool-recibos .receipt-dropdown {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  transition: border-color .15s ease;
+}
+
+.tool-recibos .receipt-dropdown:focus {
+  border-color: var(--blue-500);
+}
+
+/* Formulário de Edição */
+.tool-recibos .form-card {
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.tool-recibos .form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.tool-recibos .form-row:nth-of-type(2),
+.tool-recibos .form-row:nth-of-type(3) {
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 500px) {
+  .tool-recibos .form-row,
+  .tool-recibos .form-row:nth-of-type(2),
+  .tool-recibos .form-row:nth-of-type(3) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tool-recibos .form-group {
+  margin-bottom: 14px;
+}
+
+.tool-recibos .form-group.flex-1 { min-width: 0; }
+.tool-recibos .form-group.flex-2 { min-width: 0; }
+
+.tool-recibos .form-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gray-700);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.tool-recibos .form-control {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+  box-sizing: border-box;
+}
+
+.tool-recibos .form-control:focus {
+  border-color: var(--blue-500);
+  box-shadow: 0 0 0 3px rgba(0, 86, 255, 0.12);
+}
+
+.tool-recibos .form-control.uppercase {
+  text-transform: uppercase;
+}
+
+.tool-recibos .form-control.font-mono {
+  font-family: var(--mono);
+}
+
+.tool-recibos .form-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--gray-400);
+  margin-top: 4px;
+}
+
+.tool-recibos .form-hint.text-success {
+  color: var(--green);
+  font-weight: 500;
+}
+
+.tool-recibos .form-actions-split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-100);
+  gap: 10px;
+}
+
+/* Tabela de Recibos */
+.tool-recibos .recibos-table-wrap {
+  background: var(--card-bg);
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius);
+  max-height: 520px;
+  overflow: auto;
+  box-shadow: var(--shadow);
+}
+
+.tool-recibos .recibos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.tool-recibos .recibos-table th {
+  background: var(--gray-50);
+  padding: 9px 12px;
+  font-weight: 700;
+  color: var(--gray-700);
+  border-bottom: 1px solid var(--gray-200);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.tool-recibos .recibos-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-100);
+  color: var(--ink);
+}
+
+.tool-recibos .recibos-table tr:hover {
+  background: var(--table-hover);
+}
+
+.tool-recibos .recibos-table tr.active-row {
+  background: var(--sky-bg);
+  font-weight: 600;
+}
+
+.tool-recibos .btn-row-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--blue-500);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.tool-recibos .btn-row-action:hover {
+  background: rgba(0, 86, 255, 0.1);
+}
+
+/* ---------- COLUNA DO PREVIEW (WORD-LIKE) ---------- */
+.tool-recibos .preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.tool-recibos .preview-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gray-700);
+}
+
+.tool-recibos .preview-tag {
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--gray-100);
+  color: var(--gray-700);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.tool-recibos .preview-viewport {
+  background: #cbd5e1; /* Fundo cinza suave típico de visualizadores de documentos */
+  padding: 30px 20px;
+  border-radius: var(--radius);
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+}
+
+[data-theme="dark"] .tool-recibos .preview-viewport {
+  background: #11141a;
+}
+
+/* A FOLHA A4 BRANCA (ESTILO DOCUMENTO OFICIAL) */
+.tool-recibos .word-sheet {
+  width: 100%;
+  max-width: 595px; /* Proporção A4 web */
+  min-height: 842px;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+  border-radius: 2px;
+  padding: 48px 44px;
+  box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* Centralização vertical pura e perfeita */
+  transition: transform .15s ease;
+}
+
+/* Número da Loja Discreto no Canto Superior Direito da Folha (idêntico ao cabeçalho do navegador) */
+.tool-recibos .ws-header-row {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
+.tool-recibos .ws-top-loja {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333333;
+  font-family: inherit;
+}
+
+/* Moldura Arredondada Fiel ao Modelo Anexado */
+.tool-recibos .ws-card-frame {
+  width: 100%;
+  border: 2px solid #262626;
+  border-radius: 42px;
+  padding: 42px 38px 48px;
+  position: relative;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+/* Logotipo da Farmácia no Canto Superior Esquerdo da Moldura */
+.tool-recibos .ws-logo-container {
+  position: absolute;
+  top: 24px;
+  left: 28px;
+}
+
+.tool-recibos .ws-logo-badge {
+  background: #d82b27;
+  color: #ffffff;
+  width: 54px;
+  height: 54px;
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+}
+
+.tool-recibos .ws-logo-heart {
+  width: 14px;
+  height: 14px;
+  fill: #ffffff;
+  margin-bottom: 2px;
+}
+
+.tool-recibos .ws-logo-text {
+  font-size: 5px;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.tool-recibos .ws-logo-text strong {
+  display: block;
+  font-size: 5.5px;
+  font-weight: 900;
+}
+
+/* Título RECIBO */
+.tool-recibos .ws-title {
+  font-size: 28px;
+  font-weight: 800;
+  text-align: center;
+  color: #111111;
+  margin: 30px 0 35px 0;
+  letter-spacing: 1px;
+}
+
+/* Destaque do Valor */
+.tool-recibos .ws-valor-row {
+  text-align: right;
+  font-size: 19px;
+  font-weight: 800;
+  color: #111111;
+  margin-bottom: 28px;
+  padding-right: 6px;
+}
+
+.tool-recibos .ws-valor-num {
+  margin-left: 2px;
+}
+
+/* Corpo do Recibo */
+.tool-recibos .ws-body-text {
+  font-size: 14.5px;
+  line-height: 1.75;
+  color: #111111;
+  text-align: justify;
+  margin-bottom: 45px;
+  word-break: break-word;
+}
+
+.tool-recibos .ws-body-text strong {
+  font-weight: 700;
+}
+
+/* Assinatura */
+.tool-recibos .ws-signature-box {
+  text-align: center;
+  margin: 50px auto 35px;
+  max-width: 380px;
+}
+
+.tool-recibos .ws-signature-line {
+  font-size: 14px;
+  color: #222222;
+  letter-spacing: -0.5px;
+  margin-bottom: 12px;
+}
+
+.tool-recibos .ws-sig-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #111111;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.tool-recibos .ws-sig-cpf {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #111111;
+  font-family: inherit;
+}
+
+/* Data de Emissão no Rodapé */
+.tool-recibos .ws-date-footer {
+  text-align: center;
+  font-size: 13.5px;
+  color: #222222;
+  margin-top: 30px;
+  font-weight: 500;
+}
+
+.tool-recibos .print-all-container {
+  display: none;
+}
+
+/* ---------- IMPRESSÃO (@media print) ---------- */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Oculta tudo na aplicação */
+  .app-header,
+  .topbar,
+  .sub-nav,
+  .signature,
+  .section-head,
+  .recibos-upload-container,
+  .quick-demo-banner,
+  .actions-bar-card,
+  .mestre-panel,
+  .recibos-editor-col,
+  .preview-header,
+  .preview-viewport,
+  .overlay,
+  .toast {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  .tool-recibos,
+  .recibos-workspace,
+  .recibos-layout {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .tool-recibos .print-all-container {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .tool-recibos .print-all-container * {
+    visibility: visible !important;
+  }
+
+  .tool-recibos .print-page {
+    width: 100% !important;
+    height: 100vh !important;
+    min-height: 297mm !important;
+    box-sizing: border-box !important;
+    padding: 24mm 16mm !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important; /* Centraliza perfeitamente no meio da folha A4 */
+    page-break-after: always !important;
+    break-after: page !important;
+    background: #ffffff !important;
+  }
+
+  .tool-recibos .print-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+}

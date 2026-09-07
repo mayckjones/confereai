@@ -1,0 +1,325 @@
+<!-- ConfereAI — Ferramenta: Gerador de Recibos de Pagamento -->
+
+<div class="tool-recibos">
+
+  <!-- ETAPA 1: IMPORTAÇÃO E REGRAS -->
+  <div class="section-head">
+    <h2>1. Importar Planilha de Pagamentos</h2>
+    <span class="sub">Envie a planilha contendo VENDEDOR, CPF, VALOR, DATA, LOJA e CNPJ (.xlsx, .xls ou .csv)</span>
+  </div>
+
+  <div class="recibos-upload-container">
+    <div id="reciboDropzone" class="dropzone" tabindex="0" role="button" aria-label="Enviar planilha para gerar recibos">
+      <div class="dz-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2"/><path d="M12 18v-6m-3 3l3-3 3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3>Arraste a planilha de pagamentos aqui</h3>
+      <p>ou <span class="browse">clique para selecionar</span> o arquivo Excel (.xlsx, .xls) ou .csv</p>
+      <input id="reciboFileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
+    </div>
+
+    <!-- Status do Arquivo Carregado -->
+    <div class="recibo-file-card" id="reciboFileCard" style="display:none;">
+      <div class="rfc-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2"/><path d="M14 2v6h6" stroke="currentColor" stroke-width="2"/><path d="M10 13l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <div class="rfc-details">
+        <div class="rfc-name" id="reciboFileName">planilha.xlsx</div>
+        <div class="rfc-meta" id="reciboFileMeta">0 registros encontrados • Validação ortográfica ativa</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btnCarregarExemplo" title="Preencher com dados de exemplo da farmácia">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Recarregar
+      </button>
+      <button class="btn btn-danger-ghost btn-sm" id="btnRemoverArquivo">
+        Remover
+      </button>
+    </div>
+  </div>
+
+  <!-- Botão rápido para carregar o modelo de exemplo -->
+  <div class="quick-demo-banner" id="demoBanner">
+    <span>💡 Deseja testar imediatamente com os 15 lançamentos da <strong>Farmácia do Trabalhador</strong>?</span>
+    <button class="btn btn-sm btn-ghost" id="btnLoadSampleData">Carregar Dados de Exemplo</button>
+  </div>
+
+  <!-- ÁREA DE REVISÃO E TRABALHO (EXIBIDA APÓS IMPORTAR) -->
+  <div class="recibos-workspace" id="recibosWorkspace" style="display:none;">
+
+    <!-- BARRA DE AÇÕES PRINCIPAIS -->
+    <div class="actions-bar-card">
+      <div class="abc-info">
+        <div class="abc-badge" id="totalRecibosBadge">15 Recibos Gerados</div>
+        <div class="abc-sub" id="totalValorBadge">Total: R$ 1.490,00 • Formato de datas estritamente DD/MM/AAAA</div>
+      </div>
+      <div class="abc-actions">
+        <button class="btn btn-outline" id="btnToggleMestre">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          Editar Recibo Mestre
+        </button>
+        <button class="btn btn-primary btn-print-main" id="btnPrintPreview" title="Imprimir / Salvar recibos em PDF com opção de escolher as páginas desejadas">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimir
+        </button>
+      </div>
+    </div>
+
+    <!-- PAINEL DO RECIBO MESTRE (EDiÇÃO EM MASSA) -->
+    <div class="mestre-panel" id="mestrePanel" style="display:none;">
+      <div class="mestre-header">
+        <div class="mestre-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          Configurações do Recibo Mestre (Edição em Massa)
+        </div>
+        <button class="btn-close-panel" id="btnCloseMestre">✕</button>
+      </div>
+      <p class="mestre-desc">
+        Ao clicar em <strong>"Aplicar a Todos os Recibos"</strong>, os campos abaixo atualizarão simultaneamente todos os recibos da lista (preservando o nome do vendedor, CPF, valor individual, loja e data de cada um).
+      </p>
+
+      <div class="mestre-form-grid">
+        <div class="form-group">
+          <label>Nome da Empresa Pagadora</label>
+          <input type="text" id="mestreEmpresa" class="form-control" value="FARMACIA DO TRABALHADOR DE ALAGOAS">
+        </div>
+        <div class="form-group">
+          <label>CNPJ Geral (se quiser padronizar)</label>
+          <input type="text" id="mestreCNPJ" class="form-control" placeholder="Deixe em branco para manter o CNPJ da planilha">
+        </div>
+        <div class="form-group full-width">
+          <label>Texto Referente ao Pagamento (Motivo)</label>
+          <input type="text" id="mestreReferente" class="form-control" value="Referente a dobra e alimentação no fim de semana">
+        </div>
+        <div class="form-group">
+          <label>Cidade e Data de Emissão no Rodapé</label>
+          <input type="text" id="mestreEmissao" class="form-control" placeholder="Atualizada dinamicamente com a data de hoje">
+          <small class="form-hint">Preenchida automaticamente com a data de hoje (ex: Maceió, 07 de Setembro de 2026.)</small>
+        </div>
+        <div class="form-group">
+          <label>Prefixo do Texto Legal</label>
+          <input type="text" id="mestrePrefixo" class="form-control" value="Eu, «VENDEDOR», inscrito no CPF de número: «CPF». Recebi da">
+        </div>
+      </div>
+
+      <div class="mestre-actions">
+        <button class="btn btn-primary" id="btnApplyMestre">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          Aplicar a Todos os Recibos
+        </button>
+        <button class="btn btn-ghost" id="btnCancelMestre">Cancelar</button>
+      </div>
+    </div>
+
+    <!-- CONTAINER PRINCIPAL: LISTA / FORMULÁRIO + PREVIEW WORD -->
+    <div class="recibos-layout">
+      
+      <!-- COLUNA DA ESQUERDA: LISTA DE RECIBOS E FORMULÁRIO DE EDIÇÃO INDIVIDUAL -->
+      <div class="recibos-editor-col">
+
+        <!-- Abas: Edição do Recibo Selecionado vs Visão em Tabela -->
+        <div class="editor-tabs">
+          <button class="tab-btn active" id="tabBtnEditar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Editar Selecionado
+          </button>
+          <button class="tab-btn" id="tabBtnTabela">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
+            Tabela de Dados (<span id="tabCount">15</span>)
+          </button>
+        </div>
+
+        <!-- ABA 1: FORMULÁRIO DO RECIBO SELECIONADO -->
+        <div class="tab-content" id="tabContentEditar">
+
+          <!-- Barra de Navegação entre Recibos -->
+          <div class="receipt-nav">
+            <div class="receipt-nav-top">
+              <button class="btn btn-ghost btn-sm" id="btnPrevReceipt" title="Recibo Anterior">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                Anterior
+              </button>
+              <div class="receipt-nav-counter">
+                Recibo <strong><span id="currentReceiptNum">1</span></strong> de <strong><span id="totalReceiptsNum">15</span></strong>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="btnNextReceipt" title="Próximo Recibo">
+                Próximo
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+            <div class="receipt-nav-select-wrap">
+              <select id="selectReceiptDropdown" class="receipt-dropdown" title="Selecione o vendedor"></select>
+            </div>
+          </div>
+
+          <!-- Campos de Edição Individual -->
+          <div class="form-card">
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label>Nome do Vendedor</label>
+                <input type="text" id="editVendedor" class="form-control uppercase" placeholder="Ex: BRUNA PAULINO">
+              </div>
+              <div class="form-group flex-1">
+                <label>Loja (Topo)</label>
+                <input type="text" id="editLoja" class="form-control" placeholder="Ex: 4">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>CPF</label>
+                <input type="text" id="editCPF" class="form-control" placeholder="000.000.000-00">
+              </div>
+              <div class="form-group flex-1">
+                <label>Valor (R$)</label>
+                <input type="text" id="editValor" class="form-control font-mono" placeholder="100,00">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Valor por Extenso (Gerado Automaticamente)</label>
+              <input type="text" id="editExtenso" class="form-control" placeholder="cem reais">
+              <small class="form-hint">Você pode corrigir ou customizar o extenso se desejar.</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>Data do Serviço (DD/MM/AAAA)</label>
+                <input type="text" id="editData" class="form-control font-mono" placeholder="06/09/2026">
+                <small class="form-hint text-success">✓ Formato estrito Dia/Mês/Ano</small>
+              </div>
+              <div class="form-group flex-1">
+                <label>CNPJ da Loja/Filial</label>
+                <input type="text" id="editCNPJ" class="form-control font-mono" placeholder="00.000.000/0000-00">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Empresa Pagadora</label>
+              <input type="text" id="editEmpresa" class="form-control" placeholder="FARMACIA DO TRABALHADOR DE ALAGOAS">
+            </div>
+
+            <div class="form-group">
+              <label>Motivo do Pagamento</label>
+              <textarea id="editReferente" class="form-control" rows="2" placeholder="Referente a dobra e alimentação no fim de semana"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Cidade e Data de Emissão (Rodapé)</label>
+              <input type="text" id="editEmissao" class="form-control" placeholder="Ex: Maceió, 07 de Setembro de 2026.">
+            </div>
+
+            <div class="form-actions-split">
+              <button class="btn btn-danger-ghost btn-sm" id="btnDeleteCurrentReceipt">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Excluir Recibo
+              </button>
+              <button class="btn btn-ghost btn-sm" id="btnAddNewReceipt">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Adicionar Novo Recibo
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ABA 2: TABELA GERAL DE DADOS -->
+        <div class="tab-content" id="tabContentTabela" style="display:none;">
+          <div class="recibos-table-wrap">
+            <table class="recibos-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Vendedor</th>
+                  <th>CPF</th>
+                  <th>Valor</th>
+                  <th>Data</th>
+                  <th>Loja</th>
+                  <th>CNPJ</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="recibosTableBody">
+                <!-- Linhas preenchidas via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- COLUNA DA DIREITA: PREVIEW DO RECIBO EM TEMPO REAL (PDF-LIKE) -->
+      <div class="recibos-preview-col">
+        <div class="preview-header">
+          <div class="preview-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            Visualização Prévia em Tempo Real (Fiel ao Modelo PDF)
+          </div>
+          <div class="preview-scale-controls">
+            <span class="preview-tag">Folha A4 PDF</span>
+          </div>
+        </div>
+
+        <div class="preview-viewport">
+          <!-- FOLHA WORD EMULADA -->
+          <div class="word-sheet" id="wordSheet">
+
+            <!-- LOJA NO CANTO SUPERIOR DIREITO -->
+            <div class="ws-header-row">
+              <div class="ws-top-loja" id="viewLoja">4</div>
+            </div>
+
+            <!-- MOLDURA ARREDONDADA (Borda idêntica ao modelo anexado) -->
+            <div class="ws-card-frame">
+
+              <!-- LOGOTIPO SUPERIOR ESQUERDO -->
+              <div class="ws-logo-container">
+                <div class="ws-default-logo" id="viewLogo">
+                  <img src="ferramentas/recibos/farmacia_logo.jpg" alt="Farmácia do Trabalhador" style="width: 58px; height: 58px; object-fit: contain; border-radius: 4px; display: block;">
+                </div>
+              </div>
+
+              <!-- TÍTULO CENTRAL -->
+              <h1 class="ws-title">RECIBO</h1>
+
+              <!-- DESTAQUE DO VALOR À DIREITA -->
+              <div class="ws-valor-row">
+                <span class="ws-valor-label">R$</span>
+                <span class="ws-valor-num" id="viewValor">100,00</span>
+              </div>
+
+              <!-- CORPO DO TEXTO COM ORTOGRAFIA CORRIGIDA -->
+              <div class="ws-body-text">
+                Eu, <strong id="viewVendedor">BRUNA PAULINO</strong>, inscrito no CPF de número: <strong id="viewCPF">095.262.254-81</strong>. 
+                Recebi da <span id="viewEmpresa">FARMACIA DO TRABALHADOR DE ALAGOAS</span>, inscrita no CNPJ: 
+                <span id="viewCNPJ">24.920.850.0001-76</span> A importância de R$ <span id="viewValorInline">100,00</span> 
+                (<span id="viewExtenso">cem reais</span>). <span id="viewReferente">Referente a dobra e alimentação no fim de semana</span> 
+                nesta data <strong id="viewData">06/09/2026</strong>.
+              </div>
+
+              <!-- LINHA DE ASSINATURA -->
+              <div class="ws-signature-box">
+                <div class="ws-signature-line">_____________________________________</div>
+                <div class="ws-sig-name" id="viewSigVendedor">BRUNA PAULINO</div>
+                <div class="ws-sig-cpf" id="viewSigCPF">095.262.254-81</div>
+              </div>
+
+              <!-- DATA DE EMISSÃO NO RODAPÉ -->
+              <div class="ws-date-footer" id="viewEmissao">
+                Maceió, 04 de Setembro de 2026.
+              </div>
+
+            </div> <!-- /ws-card-frame -->
+
+          </div> <!-- /word-sheet -->
+        </div> <!-- /preview-viewport -->
+
+      </div> <!-- /recibos-preview-col -->
+
+    </div> <!-- /recibos-layout -->
+
+  </div> <!-- /recibos-workspace -->
+
+  <!-- Container especial invisível em tela e renderizado apenas na impressão (@media print) contendo todos os recibos -->
+  <div id="printAllContainer" class="print-all-container"></div>
+
+</div> <!-- /tool-recibos -->
