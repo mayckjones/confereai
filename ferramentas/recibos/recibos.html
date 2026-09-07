@@ -99,6 +99,16 @@
           <label>Prefixo do Texto Legal</label>
           <input type="text" id="mestrePrefixo" class="form-control" value="Eu, «VENDEDOR», inscrito no CPF de número: «CPF». Recebi da">
         </div>
+        <div class="form-group">
+          <label>Número da Loja (Topo)</label>
+          <input type="text" id="mestreLoja" class="form-control" placeholder="Deixe em branco para manter a loja individual">
+          <small class="form-hint">Opcional: se preenchido, padroniza a loja de todos os recibos</small>
+        </div>
+        <div class="form-group full-width">
+          <label>Substituir Logotipo da Farmácia (.jpg ou .png)</label>
+          <input type="file" id="mestreLogoInput" accept="image/jpeg,image/png,image/jpg" class="form-control" style="padding:6px; background:var(--card-bg);">
+          <small class="form-hint">Você pode carregar o arquivo por aqui ou colar sua imagem como <strong>farmacia_logo.jpg</strong> na pasta <code>ferramentas/recibos/</code></small>
+        </div>
       </div>
 
       <div class="mestre-actions">
@@ -298,7 +308,7 @@
 
               <!-- LINHA DE ASSINATURA -->
               <div class="ws-signature-box">
-                <div class="ws-signature-line">_____________________________________</div>
+                <div class="ws-signature-line">_______________________________________________________</div>
                 <div class="ws-sig-name" id="viewSigVendedor">BRUNA PAULINO</div>
                 <div class="ws-sig-cpf" id="viewSigCPF">095.262.254-81</div>
               </div>

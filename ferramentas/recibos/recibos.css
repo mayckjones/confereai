@@ -575,36 +575,39 @@
   color: #000000;
   box-shadow: 0 8px 30px rgba(0,0,0,0.18);
   border-radius: 2px;
-  padding: 48px 44px;
+  padding: 24px 44px 84px 44px; /* Margem inferior acentuada para subir o recibo e harmonizar */
   box-sizing: border-box;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: center; /* Centralização vertical pura e perfeita */
+  justify-content: center; /* Centralização com leve elevação */
   transition: transform .15s ease;
 }
 
 /* Número da Loja Discreto no Canto Superior Direito da Folha (idêntico ao cabeçalho do navegador) */
 .tool-recibos .ws-header-row {
-  width: 100%;
+  position: absolute;
+  top: 18px;
+  right: 28px;
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 20px;
+  z-index: 5;
 }
 
 .tool-recibos .ws-top-loja {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  color: #333333;
-  font-family: inherit;
+  color: #555555;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.2px;
 }
 
 /* Moldura Arredondada Fiel ao Modelo Anexado */
 .tool-recibos .ws-card-frame {
   width: 100%;
   border: 2px solid #262626;
-  border-radius: 42px;
+  border-radius: 60px;
   padding: 42px 38px 48px;
   position: relative;
   background: #ffffff;
@@ -695,7 +698,7 @@
 .tool-recibos .ws-signature-box {
   text-align: center;
   margin: 50px auto 35px;
-  max-width: 380px;
+  max-width: 480px;
 }
 
 .tool-recibos .ws-signature-line {
@@ -703,6 +706,7 @@
   color: #222222;
   letter-spacing: -0.5px;
   margin-bottom: 12px;
+  white-space: nowrap;
 }
 
 .tool-recibos .ws-sig-name {
@@ -734,13 +738,36 @@
 }
 
 /* ---------- IMPRESSÃO (@media print) ---------- */
+@page {
+  size: A4 portrait;
+  margin: 0; /* Remove margens padrão do navegador para controle total */
+}
+
 @media print {
-  body {
+  html, body {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Oculta tudo na aplicação */
+  .app {
+    max-width: 100% !important;
+    width: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Oculta tudo na aplicação para manter apenas as páginas impressas */
   .app-header,
   .topbar,
   .sub-nav,
@@ -751,6 +778,7 @@
   .actions-bar-card,
   .mestre-panel,
   .recibos-editor-col,
+  .recibos-preview-col,
   .preview-header,
   .preview-viewport,
   .overlay,
@@ -770,7 +798,7 @@
   .tool-recibos .print-all-container {
     display: block !important;
     visibility: visible !important;
-    width: 100% !important;
+    width: 210mm !important;
     margin: 0 !important;
     padding: 0 !important;
   }
@@ -780,17 +808,31 @@
   }
 
   .tool-recibos .print-page {
-    width: 100% !important;
-    height: 100vh !important;
-    min-height: 297mm !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
     box-sizing: border-box !important;
-    padding: 24mm 16mm !important;
+    padding: 10mm 18mm 44mm 18mm !important; /* Margem inferior de 44mm para subir o recibo perfeitamente */
     display: flex !important;
     flex-direction: column !important;
-    justify-content: center !important; /* Centraliza perfeitamente no meio da folha A4 */
+    justify-content: center !important;
+    page-break-before: auto !important;
     page-break-after: always !important;
     break-after: page !important;
     background: #ffffff !important;
+    position: relative !important;
+  }
+
+  .tool-recibos .print-discreet-header {
+    position: absolute !important;
+    top: 11mm !important;
+    right: 18mm !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    color: #555555 !important;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+    letter-spacing: 0.2px !important;
+    line-height: 1 !important;
   }
 
   .tool-recibos .print-page:last-child {

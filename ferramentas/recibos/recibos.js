@@ -45,7 +45,9 @@ window.__tool_init_recibos = function() {
   let mestreConfig = {
     empresa: 'FARMACIA DO TRABALHADOR DE ALAGOAS',
     referente: 'Referente a dobra e alimentação no fim de semana',
-    emissao: obterDataAtualPorExtenso('Maceió')
+    emissao: obterDataAtualPorExtenso('Maceió'),
+    loja: '',
+    logoUrl: 'ferramentas/recibos/farmacia_logo.jpg'
   };
 
   // ELEMENTOS DO DOM
@@ -73,6 +75,8 @@ window.__tool_init_recibos = function() {
   const mestreCNPJ = document.getElementById('mestreCNPJ');
   const mestreReferente = document.getElementById('mestreReferente');
   const mestreEmissao = document.getElementById('mestreEmissao');
+  const mestreLoja = document.getElementById('mestreLoja');
+  const mestreLogoInput = document.getElementById('mestreLogoInput');
 
   // Abas e Navegação
   const tabBtnEditar = document.getElementById('tabBtnEditar');
@@ -248,10 +252,15 @@ window.__tool_init_recibos = function() {
       return;
     }
 
+    // Garante que todo recibo tenha o número da loja (herda da primeira linha ou fallback se vier em branco)
+    const lojaPadrao = (mestreConfig.loja && mestreConfig.loja.trim()) || 
+                       (lista.find(item => item.loja && String(item.loja).trim())?.loja) || '4';
+
     recibosList = lista.map(item => {
       const val = typeof item.valor === 'number' ? item.valor : (parseValorBR(item.valor) || 100.00);
       const dataFormatada = formatarDataEstrita(item.data);
       const extensoAuto = item.extenso || numeroParaExtenso(val);
+      const lojaItem = (item.loja && String(item.loja).trim()) ? String(item.loja).trim() : String(lojaPadrao).trim();
 
       return {
         vendedor: String(item.vendedor || item.nome || '').trim().toUpperCase(),
@@ -259,7 +268,7 @@ window.__tool_init_recibos = function() {
         valor: val,
         extenso: extensoAuto,
         data: dataFormatada,
-        loja: String(item.loja || '').trim(),
+        loja: lojaItem,
         cnpj: String(item.cnpj || '').trim(),
         empresa: item.empresa || mestreConfig.empresa,
         referente: item.referente || mestreConfig.referente,
@@ -282,6 +291,7 @@ window.__tool_init_recibos = function() {
     popularDropdown();
     preencherFormularioEPreview();
     renderizarTabela();
+    atualizarContainerImpressaoGeral();
 
     showToast(`${recibosList.length} recibos gerados com sucesso!`);
   }
@@ -388,6 +398,7 @@ window.__tool_init_recibos = function() {
     }
 
     atualizarResumoHeader();
+    atualizarContainerImpressaoGeral();
   }
 
   // Escuta inputs no formulário individual
@@ -521,6 +532,7 @@ window.__tool_init_recibos = function() {
       mestreEmpresa.value = mestreConfig.empresa;
       mestreReferente.value = mestreConfig.referente;
       mestreEmissao.value = mestreConfig.emissao;
+      if (mestreLoja) mestreLoja.value = mestreConfig.loja || '';
     }
     mestrePanel.style.display = isVisible ? 'none' : 'block';
   });
@@ -533,10 +545,12 @@ window.__tool_init_recibos = function() {
     const novoReferente = mestreReferente.value.trim();
     const novaEmissao = mestreEmissao.value.trim();
     const novoCNPJ = mestreCNPJ.value.trim();
+    const novaLoja = mestreLoja ? mestreLoja.value.trim() : '';
 
     mestreConfig.empresa = novaEmpresa;
     mestreConfig.referente = novoReferente;
     mestreConfig.emissao = novaEmissao;
+    if (novaLoja) mestreConfig.loja = novaLoja;
 
     recibosList.forEach(r => {
       r.empresa = novaEmpresa;
@@ -545,13 +559,40 @@ window.__tool_init_recibos = function() {
       if (novoCNPJ) {
         r.cnpj = novoCNPJ;
       }
+      if (novaLoja) {
+        r.loja = novaLoja;
+      }
     });
 
     preencherFormularioEPreview();
     renderizarTabela();
+    atualizarContainerImpressaoGeral();
     mestrePanel.style.display = 'none';
     showToast(`Alterações do Mestre aplicadas a todos os ${recibosList.length} recibos!`);
   });
+
+  // Atualização de Logotipo via Upload na UI
+  if (mestreLogoInput) {
+    mestreLogoInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        mestreConfig.logoUrl = ev.target.result;
+        atualizarLogoVisualizacao();
+        atualizarContainerImpressaoGeral();
+        showToast('Novo logotipo aplicado com sucesso!');
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function atualizarLogoVisualizacao() {
+    const previewImg = document.querySelector('#viewLogo img');
+    if (previewImg && mestreConfig.logoUrl) {
+      previewImg.src = mestreConfig.logoUrl;
+    }
+  }
 
 
   // =========================================================================
@@ -595,7 +636,8 @@ window.__tool_init_recibos = function() {
           return;
         }
 
-        // Mapeador inteligente de colunas
+        // Mapeador inteligente de colunas com propagação de loja para células mescladas/em branco
+        let lastSeenLoja = '';
         const items = rawJson.map(row => {
           let vendedor = '', cpf = '', valor = 0, dataVal = '', loja = '', cnpj = '';
 
@@ -615,6 +657,12 @@ window.__tool_init_recibos = function() {
             } else if (cleanKey.includes('CNPJ')) {
               cnpj = row[key];
             }
+          }
+
+          if (loja && String(loja).trim()) {
+            lastSeenLoja = String(loja).trim();
+          } else if (lastSeenLoja) {
+            loja = lastSeenLoja;
           }
 
           return {
@@ -1000,18 +1048,18 @@ window.__tool_init_recibos = function() {
   function gerarHtmlReciboParaPdf(r) {
     const valorFmt = formatarMoeda(r.valor);
     const extensoFmt = r.extenso || numeroParaExtenso(r.valor);
-    const lojaTexto = r.loja ? String(r.loja).trim() : '';
+    const lojaTexto = (r.loja && String(r.loja).trim()) || (mestreConfig.loja && String(mestreConfig.loja).trim()) || '';
 
     return `
-      <!-- Cabeçalho idêntico à imagem de referência: Discreto no topo direito, alinhado à margem -->
-      <div style="width:100%; display:flex; justify-content:flex-end; align-items:center; margin-bottom:20px; font-size:12px; font-weight:500; color:#333333; font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+      <!-- Cabeçalho idêntico à imagem de referência: Discreto no topo direito da folha A4 -->
+      <div class="print-discreet-header" style="position:absolute; top:11mm; right:18mm; font-size:11px; font-weight:500; color:#555555; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; letter-spacing:0.2px;">
         <span>${lojaTexto}</span>
       </div>
 
-      <!-- Moldura do Recibo Centralizada na Folha -->
-      <div style="width:100%; border:2px solid #222222; border-radius:42px; padding:44px 38px 48px; position:relative; background:#ffffff; box-sizing:border-box;">
+      <!-- Moldura do Recibo Centralizada na Folha e Levemente Elevada -->
+      <div style="width:100%; border:2px solid #222222; border-radius:60px; padding:44px 38px 48px; position:relative; background:#ffffff; box-sizing:border-box;">
         <div style="position:absolute; top:24px; left:26px;">
-          <img src="ferramentas/recibos/farmacia_logo.jpg" alt="Logo" style="width:55px; height:55px; object-fit:contain; border-radius:3px; display:block;">
+          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpg'}" alt="Logo" style="width:55px; height:55px; object-fit:contain; border-radius:3px; display:block;">
         </div>
         <h1 style="font-size:27px; font-weight:800; text-align:center; color:#111111; margin:28px 0 32px; letter-spacing:1px;">RECIBO</h1>
         <div style="text-align:right; font-size:19px; font-weight:800; color:#111111; margin-bottom:26px; padding-right:4px;">
@@ -1022,8 +1070,8 @@ window.__tool_init_recibos = function() {
           Recebi da ${r.empresa}, inscrita no CNPJ: ${r.cnpj} A importância de R$ ${valorFmt} 
           (${extensoFmt}). ${r.referente} nesta data <strong>${r.data}</strong>.
         </div>
-        <div style="text-align:center; margin:45px auto 30px; max-width:380px;">
-          <div style="font-size:14px; color:#222222; margin-bottom:10px;">_____________________________________</div>
+        <div style="text-align:center; margin:45px auto 30px; max-width:480px;">
+          <div style="font-size:14px; color:#222222; margin-bottom:10px; letter-spacing:-0.5px; white-space:nowrap;">_______________________________________________________</div>
           <div style="font-size:14px; font-weight:800; color:#111111; text-transform:uppercase; margin-bottom:4px;">${r.vendedor}</div>
           <div style="font-size:13.5px; font-weight:700; color:#111111;">${r.cpf}</div>
         </div>
@@ -1170,18 +1218,40 @@ window.__tool_init_recibos = function() {
     }
   }
 
+  // Garante sincronia antes de qualquer impressão e suprime o título padrão "confereai"
+  let originalDocumentTitle = document.title;
+  const handleBeforePrint = () => {
+    atualizarContainerImpressaoGeral();
+    originalDocumentTitle = document.title;
+    document.title = ' '; // Evita que o navegador imprima "confereai" no topo
+  };
+
+  const handleAfterPrint = () => {
+    document.title = originalDocumentTitle || 'ConfereAI';
+  };
+
+  window.addEventListener('beforeprint', handleBeforePrint);
+  window.addEventListener('afterprint', handleAfterPrint);
+
   // Bindings dos botões de download e impressão
   if (btnDownloadAllPdf) btnDownloadAllPdf.addEventListener('click', baixarTodosEmPdf);
   if (btnDownloadIndividual) btnDownloadIndividual.addEventListener('click', baixarReciboIndividualPdf);
   if (btnPrintPreview) {
     btnPrintPreview.addEventListener('click', () => {
       atualizarContainerImpressaoGeral();
+      const prevTitle = document.title;
+      document.title = ' ';
       window.print();
+      setTimeout(() => {
+        document.title = prevTitle || 'ConfereAI';
+      }, 1000);
     });
   }
 
   // Limpeza de recursos caso a rota mude
   window.__tool_destroy_recibos = function() {
+    window.removeEventListener('beforeprint', handleBeforePrint);
+    window.removeEventListener('afterprint', handleAfterPrint);
     recibosList = [];
   };
 };
