@@ -49,14 +49,15 @@ const Router = (function(){
       currentTool = toolId;
       container.innerHTML = ''; // Limpa a tela antiga imediatamente
 
-      // Paths
+      // Paths (com cache-buster para evitar arquivos presos no cache do navegador)
+      const v = `?v=${Date.now()}`;
       const basePath = `ferramentas/${toolId}/${toolId}`;
-      const htmlPath = `${basePath}.html`;
-      const cssPath = `${basePath}.css`;
-      const jsPath = `${basePath}.js`;
+      const htmlPath = `${basePath}.html${v}`;
+      const cssPath = `${basePath}.css${v}`;
+      const jsPath = `${basePath}.js${v}`;
 
       // 1. Fetch HTML (não injeta ainda)
-      const response = await fetch(htmlPath);
+      const response = await fetch(htmlPath, { cache: 'no-cache' });
       if(!response.ok) throw new Error('Ferramenta não encontrada');
       const html = await response.text();
 

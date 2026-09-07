@@ -34,6 +34,8 @@ window.__tool_init_recibos = function() {
   // ELEMENTOS DO DOM
   const dropzone = document.getElementById('reciboDropzone');
   const fileInput = document.getElementById('reciboFileInput');
+  const manualEntryCard = document.getElementById('manualEntryCard');
+  const btnGerarManual = document.getElementById('btnGerarManual');
   const fileCard = document.getElementById('reciboFileCard');
   const fileName = document.getElementById('reciboFileName');
   const fileMeta = document.getElementById('reciboFileMeta');
@@ -258,6 +260,7 @@ window.__tool_init_recibos = function() {
 
     // Atualiza status do arquivo
     dropzone.style.display = 'none';
+    if (manualEntryCard) manualEntryCard.style.display = 'none';
     fileCard.style.display = 'flex';
     fileName.textContent = nomeFonte || 'Planilha_de_Pagamentos.xlsx';
     fileMeta.textContent = `${recibosList.length} recibos processados`;
@@ -271,6 +274,62 @@ window.__tool_init_recibos = function() {
     atualizarContainerImpressaoGeral();
 
     showToast(`${recibosList.length} recibos gerados com sucesso!`);
+  }
+
+  // Função auxiliar para data atual formatada DD/MM/AAAA
+  function obterDataHojeFormatada() {
+    const hoje = new Date();
+    const dia = String(hoje.getDate()).padStart(2, '0');
+    const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+    const ano = hoje.getFullYear();
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  // =========================================================================
+  // MODO MANUAL (DIGITANDO RECIBOS SEM PLANILHA)
+  // =========================================================================
+  function iniciarModoManual() {
+    const dataHoje = obterDataHojeFormatada();
+    const itemManual = {
+      vendedor: '',
+      cpf: '',
+      valor: 0,
+      extenso: '',
+      data: dataHoje,
+      loja: (mestreConfig.loja && mestreConfig.loja.trim()) || '1',
+      cnpj: (mestreConfig.cnpj && mestreConfig.cnpj.trim()) || '24.920.850/0001-76',
+      empresa: mestreConfig.empresa,
+      referente: mestreConfig.referente,
+      emissao: mestreConfig.emissao
+    };
+
+    recibosList = [itemManual];
+    currentIndex = 0;
+
+    // Alterna visualização: oculta dropzone e banner, exibe card e workspace
+    dropzone.style.display = 'none';
+    if (manualEntryCard) manualEntryCard.style.display = 'none';
+    fileCard.style.display = 'flex';
+    fileName.textContent = 'Modo Manual (Digitando recibos)';
+    fileMeta.textContent = '1 recibo criado • Preenchimento direto na tela';
+
+    workspace.style.display = 'block';
+
+    atualizarResumoHeader();
+    popularDropdown();
+    preencherFormularioEPreview();
+    renderizarTabela();
+    atualizarContainerImpressaoGeral();
+
+    setTimeout(() => {
+      if (editVendedor) editVendedor.focus();
+    }, 100);
+
+    showToast('Modo manual ativado! Preencha os dados do vendedor.');
+  }
+
+  if (btnGerarManual) {
+    btnGerarManual.addEventListener('click', iniciarModoManual);
   }
 
   function atualizarResumoHeader() {
@@ -461,14 +520,15 @@ window.__tool_init_recibos = function() {
   });
 
   btnAddNewReceipt.addEventListener('click', () => {
+    const ultimo = (recibosList.length > 0 && recibosList[currentIndex]) ? recibosList[currentIndex] : null;
     const novo = {
-      vendedor: 'NOVO VENDEDOR',
-      cpf: '000.000.000-00',
-      valor: 100.00,
-      extenso: 'cem reais',
-      data: '06/09/2026',
-      loja: '1',
-      cnpj: '24.920.850.0001-76',
+      vendedor: '',
+      cpf: '',
+      valor: 0,
+      extenso: '',
+      data: ultimo?.data || obterDataHojeFormatada(),
+      loja: ultimo?.loja || (mestreConfig.loja || '1'),
+      cnpj: ultimo?.cnpj || (mestreConfig.cnpj || '24.920.850/0001-76'),
       empresa: mestreConfig.empresa,
       referente: mestreConfig.referente,
       emissao: mestreConfig.emissao
@@ -478,15 +538,25 @@ window.__tool_init_recibos = function() {
     popularDropdown();
     preencherFormularioEPreview();
     renderizarTabela();
-    showToast('Novo recibo adicionado.');
+    atualizarResumoHeader();
+    atualizarContainerImpressaoGeral();
+    if (fileMeta && fileName.textContent.includes('Manual')) {
+      fileMeta.textContent = `${recibosList.length} recibos criados • Preenchimento direto na tela`;
+    }
+    showToast('Novo recibo adicionado. Digite os dados do vendedor.');
+    setTimeout(() => {
+      if (editVendedor) editVendedor.focus();
+    }, 50);
   });
 
   btnDeleteCurrentReceipt.addEventListener('click', () => {
     if (recibosList.length <= 1) {
-      showToast('A lista precisa conter pelo menos um recibo.', true);
+      if (confirm('Este é o único recibo na tela. Deseja remover e voltar para a tela inicial?')) {
+        btnRemoverArquivo.click();
+      }
       return;
     }
-    const nome = recibosList[currentIndex].vendedor;
+    const nome = recibosList[currentIndex].vendedor || `Recibo #${currentIndex + 1}`;
     if (confirm(`Deseja realmente remover o recibo de "${nome}"?`)) {
       recibosList.splice(currentIndex, 1);
       if (currentIndex >= recibosList.length) {
@@ -495,6 +565,11 @@ window.__tool_init_recibos = function() {
       popularDropdown();
       preencherFormularioEPreview();
       renderizarTabela();
+      atualizarResumoHeader();
+      atualizarContainerImpressaoGeral();
+      if (fileMeta && fileName.textContent.includes('Manual')) {
+        fileMeta.textContent = `${recibosList.length} ${recibosList.length === 1 ? 'recibo criado' : 'recibos criados'} • Preenchimento direto na tela`;
+      }
       showToast('Recibo removido.');
     }
   });
@@ -698,8 +773,9 @@ window.__tool_init_recibos = function() {
     workspace.style.display = 'none';
     fileCard.style.display = 'none';
     dropzone.style.display = 'block';
+    if (manualEntryCard) manualEntryCard.style.display = 'flex';
     fileInput.value = '';
-    showToast('Planilha removida.');
+    showToast('Recibos removidos.');
   });
 
 

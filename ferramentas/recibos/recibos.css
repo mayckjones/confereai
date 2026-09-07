@@ -66,6 +66,69 @@
   text-underline-offset: 2px;
 }
 
+/* Opção: Gerar Recibo Manualmente (sem planilha) */
+.tool-recibos .recibos-manual-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--card-bg);
+  border: 1px dashed var(--gray-200);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-top: 14px;
+  box-shadow: var(--shadow);
+  transition: border-color var(--transition), background-color var(--transition), box-shadow var(--transition);
+}
+
+.tool-recibos .recibos-manual-card:hover {
+  border-color: var(--blue-500);
+  background: rgba(0, 86, 255, 0.02);
+}
+
+.tool-recibos .rmc-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tool-recibos .rmc-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--sky-bg);
+  color: var(--blue-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-recibos .rmc-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-recibos .rmc-text strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tool-recibos .rmc-text span {
+  font-size: 12.5px;
+  color: var(--gray-500);
+}
+
+@media (max-width: 640px) {
+  .tool-recibos .recibos-manual-card {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+  }
+}
+
 /* Card do Arquivo Carregado */
 .tool-recibos .recibo-file-card {
   display: flex;

@@ -2,9 +2,9 @@
 
 <div class="tool-recibos">
 
-  <!-- ETAPA 1: IMPORTAÇÃO E REGRAS -->
+  <!-- ETAPA 1: IMPORTAÇÃO OU CRIAÇÃO MANUAL -->
   <div class="section-head">
-    <h2>1. Importar Planilha de Pagamentos</h2>
+    <h2>1. Importar Planilha ou Criar Manual</h2>
   </div>
 
   <div class="recibos-upload-container">
@@ -15,6 +15,23 @@
       <h3>Arraste a planilha de pagamentos aqui</h3>
       <p>ou <span class="browse">clique para selecionar</span> o arquivo Excel (.xlsx, .xls) ou .csv</p>
       <input id="reciboFileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
+    </div>
+
+    <!-- Opção de Criar Recibo Manualmente (sem planilha) -->
+    <div class="recibos-manual-card" id="manualEntryCard">
+      <div class="rmc-info">
+        <div class="rmc-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
+        <div class="rmc-text">
+          <strong>Não possui planilha pronta?</strong>
+          <span>Gere recibos digitando as informações diretamente na tela, sem anexar arquivos.</span>
+        </div>
+      </div>
+      <button class="btn btn-outline" id="btnGerarManual" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Gerar Recibo Manual
+      </button>
     </div>
 
     <!-- Status do Arquivo Carregado -->
