@@ -47,7 +47,7 @@ window.__tool_init_recibos = function() {
     referente: 'Referente a dobra e alimentação no fim de semana',
     emissao: obterDataAtualPorExtenso('Maceió'),
     loja: '',
-    logoUrl: 'ferramentas/recibos/farmacia_logo.jpg'
+    logoUrl: 'ferramentas/recibos/farmacia_logo.jpeg'
   };
 
   // ELEMENTOS DO DOM
@@ -1059,7 +1059,7 @@ window.__tool_init_recibos = function() {
       <!-- Moldura do Recibo Centralizada na Folha e Levemente Elevada -->
       <div style="width:100%; border:2px solid #222222; border-radius:60px; padding:44px 38px 48px; position:relative; background:#ffffff; box-sizing:border-box;">
         <div style="position:absolute; top:24px; left:26px;">
-          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpg'}" alt="Logo" style="width:55px; height:55px; object-fit:contain; border-radius:3px; display:block;">
+          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpeg'}" alt="Logo" style="width:55px; height:55px; object-fit:contain; border-radius:3px; display:block;">
         </div>
         <h1 style="font-size:27px; font-weight:800; text-align:center; color:#111111; margin:28px 0 32px; letter-spacing:1px;">RECIBO</h1>
         <div style="text-align:right; font-size:19px; font-weight:800; color:#111111; margin-bottom:26px; padding-right:4px;">
