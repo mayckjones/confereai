@@ -23,12 +23,16 @@ window.__tool_init_recibos = function() {
   // ESTADO DA APLICAÇÃO
   let recibosList = [];
   let currentIndex = 0;
+  const defaultLogoDataUri = window.FARMACIA_LOGO_BASE64 
+    ? ('data:image/jpeg;base64,' + window.FARMACIA_LOGO_BASE64)
+    : 'ferramentas/recibos/farmacia_logo.jpeg';
+
   let mestreConfig = {
     empresa: 'FARMACIA DO TRABALHADOR DE ALAGOAS',
     referente: 'Referente a dobra e alimentação no fim de semana',
     emissao: obterDataAtualPorExtenso('Maceió'),
     loja: '',
-    logoUrl: 'ferramentas/recibos/farmacia_logo.jpeg'
+    logoUrl: defaultLogoDataUri
   };
 
   // ELEMENTOS DO DOM
@@ -1291,6 +1295,9 @@ window.__tool_init_recibos = function() {
       }, 1000);
     });
   }
+
+  // Inicializa o logo da prévia visual com a fonte garantida
+  atualizarLogoVisualizacao();
 
   // Limpeza de recursos caso a rota mude
   window.__tool_destroy_recibos = function() {
