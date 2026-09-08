@@ -812,7 +812,26 @@
     padding: 0 !important;
   }
 
-  /* Oculta tudo na aplicação para manter apenas as páginas impressas */
+  /* Oculta tudo na aplicação e elementos externos/extensões injetados pelo navegador */
+  body > *:not(.app) {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    position: absolute !important;
+    left: -9999px !important;
+  }
+
+  /* Oculta possíveis extensões de RSS, downloaders ou barras flutuantes */
+  [class*="rss"],
+  [id*="rss"],
+  [class*="feed"],
+  [id*="feed"],
+  div[style*="fixed"],
+  span[style*="fixed"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
   .app-header,
   .topbar,
   .sub-nav,
