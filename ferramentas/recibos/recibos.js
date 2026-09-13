@@ -802,6 +802,25 @@ window.__tool_init_recibos = function() {
     return records;
   }
 
+  function ordenarAbasParaImportacao(sheetNames, activeTab) {
+    const ordered = [];
+    const mainSheetIndex = sheetNames.findIndex(name => normalizarCabecalhoImportacao(name) === 'DOBRAS');
+
+    // A aba principal "Dobras" sempre deve vencer versões auxiliares, como "Dobras 2".
+    if (mainSheetIndex >= 0) ordered.push(sheetNames[mainSheetIndex]);
+
+    if (Number.isInteger(activeTab) && activeTab >= 0 && activeTab < sheetNames.length) {
+      const activeSheet = sheetNames[activeTab];
+      if (!ordered.includes(activeSheet)) ordered.push(activeSheet);
+    }
+
+    sheetNames.forEach(sheetName => {
+      if (!ordered.includes(sheetName)) ordered.push(sheetName);
+    });
+
+    return ordered;
+  }
+
   function processarArquivoPlanilha(file) {
     if (!file) return;
     showOverlay('Lendo e processando planilha de pagamentos…');
@@ -815,12 +834,9 @@ window.__tool_init_recibos = function() {
         let items = [];
         const sheetNames = workbook.SheetNames.slice();
         const activeTab = Number(workbook.Workbook?.WBView?.[0]?.activeTab);
-        if (Number.isInteger(activeTab) && activeTab >= 0 && activeTab < sheetNames.length) {
-          const [activeSheet] = sheetNames.splice(activeTab, 1);
-          sheetNames.unshift(activeSheet);
-        }
+        const sheetNamesOrdenados = ordenarAbasParaImportacao(sheetNames, activeTab);
 
-        for (const sheetName of sheetNames) {
+        for (const sheetName of sheetNamesOrdenados) {
           const worksheet = workbook.Sheets[sheetName];
           // Hidden columns remain in the worksheet; keep them in the row arrays.
           const rows = XLSX.utils.sheet_to_json(worksheet, {
