@@ -199,12 +199,15 @@ window.__tool_init_recibos = function() {
 
     const s = String(raw).trim();
 
-    // Se já estiver no padrão DD/MM/AAAA
-    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    // Datas brasileiras e datas já convertidas pelo Excel, como 9/15/26.
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
     if (m) {
-      const d = m[1].padStart(2, '0');
-      const mo = m[2].padStart(2, '0');
-      const y = m[3];
+      const first = Number(m[1]);
+      const second = Number(m[2]);
+      const excelAmericanFormat = first <= 12 && second > 12;
+      const d = String(excelAmericanFormat ? second : first).padStart(2, '0');
+      const mo = String(excelAmericanFormat ? first : second).padStart(2, '0');
+      const y = m[3].length === 2 ? `20${m[3]}` : m[3];
       return `${d}/${mo}/${y}`;
     }
 
@@ -684,6 +687,8 @@ window.__tool_init_recibos = function() {
 
   function limparValorImportado(value) {
     if (value == null) return '';
+    // Mantém números do Excel, especialmente a data serial, para conversão correta.
+    if (typeof value === 'number') return value;
     const text = String(value).trim();
     if (/^#(N\/D|N\/A|REF!|VALOR!|VALUE!|DIV\/0!|NAME\?|NUM!|NULL!)/i.test(text)) return '';
     return text;
@@ -803,11 +808,12 @@ window.__tool_init_recibos = function() {
   }
 
   function ordenarAbasParaImportacao(sheetNames, activeTab) {
-    const ordered = [];
     const mainSheetIndex = sheetNames.findIndex(name => normalizarCabecalhoImportacao(name) === 'DOBRAS');
 
-    // A aba principal "Dobras" sempre deve vencer versões auxiliares, como "Dobras 2".
-    if (mainSheetIndex >= 0) ordered.push(sheetNames[mainSheetIndex]);
+    // Quando a aba principal existe, não use versões auxiliares como "Dobras 2".
+    if (mainSheetIndex >= 0) return [sheetNames[mainSheetIndex]];
+
+    const ordered = [];
 
     if (Number.isInteger(activeTab) && activeTab >= 0 && activeTab < sheetNames.length) {
       const activeSheet = sheetNames[activeTab];
@@ -835,6 +841,7 @@ window.__tool_init_recibos = function() {
         const sheetNames = workbook.SheetNames.slice();
         const activeTab = Number(workbook.Workbook?.WBView?.[0]?.activeTab);
         const sheetNamesOrdenados = ordenarAbasParaImportacao(sheetNames, activeTab);
+        const possuiAbaDobras = sheetNames.some(name => normalizarCabecalhoImportacao(name) === 'DOBRAS');
 
         for (const sheetName of sheetNamesOrdenados) {
           const worksheet = workbook.Sheets[sheetName];
@@ -842,7 +849,7 @@ window.__tool_init_recibos = function() {
           const rows = XLSX.utils.sheet_to_json(worksheet, {
             header: 1,
             defval: '',
-            raw: false,
+            raw: true,
             blankrows: false,
             skipHidden: false
           });
@@ -861,7 +868,12 @@ window.__tool_init_recibos = function() {
 
         hideOverlay();
         if (!items.length) {
-          showToast('Nenhum registro encontrado na planilha.', true);
+          showToast(
+            possuiAbaDobras
+              ? 'A aba Dobras foi encontrada, mas não possui registros preenchidos para gerar recibos.'
+              : 'Nenhum registro encontrado na planilha.',
+            true
+          );
           return;
         }
 
