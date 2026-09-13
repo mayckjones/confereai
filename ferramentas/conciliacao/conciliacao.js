@@ -12,8 +12,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
    STATE
    ========================================================================= */
 var state = {
-  files: { caixa: [], sicredi: [], cielo: [] },
-  parsed: { caixa: [], sicredi: [], cielo: [] },
+  files: { caixa: [], sicredi: [], cielo: [], lancamentos: [] },
+  parsed: { caixa: [], sicredi: [], cielo: [], lancamentos: [] },
+  cardAudit: null,
+  cardFilter: 'pending',
+  pairs: null,
   divergences: [],
   summary: [],
   alignedRows: [],
@@ -21,6 +24,76 @@ var state = {
 };
 
 var MODAL_LABEL = { PIX: 'PIX', Debito: 'Débito', Credito: 'Crédito', Dinheiro: 'Dinheiro', Cartao: 'Cartão (não especificado)', Outro: 'Não identificado' };
+
+function normalizeText(value){ return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim(); }
+function escapeHtml(value){ return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function cents(value){ return Math.round(value * 100); }
+function sumValues(list, key){ return list.reduce(function(sum, tx){ return sum + (Number.isFinite(tx[key || 'valor']) ? cents(tx[key || 'valor']) : 0); }, 0) / 100; }
+function detectBrand(value){
+  var text = normalizeText(value);
+  if(/AMERICAN EXPRESS|AMEX/.test(text)) return 'American Express';
+  if(/MASTERCARD|MASTER CARD/.test(text)) return 'Mastercard';
+  if(/VISA/.test(text)) return 'Visa';
+  if(/\bELO\b/.test(text)) return 'Elo';
+  if(/HIPERCARD/.test(text)) return 'Hipercard';
+  if(/DINERS/.test(text)) return 'Diners';
+  return null;
+}
+
+function brandLabel(brand, warning){
+  var marks = {
+    Mastercard: '<circle cx="11" cy="12" r="8" fill="#eb001b"/><circle cx="21" cy="12" r="8" fill="#f79e1b" fill-opacity=".9"/>',
+    Visa: '<text x="16" y="17" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-style="italic" font-size="13" fill="#17357c">VISA</text>',
+    Elo: '<text x="16" y="17" text-anchor="middle" font-family="Arial,sans-serif" font-weight="800" font-size="17" fill="#222">elo</text><path d="M3 4h7" stroke="#ffcb05" stroke-width="2"/><path d="M13 4h7" stroke="#00a4df" stroke-width="2"/><path d="M23 4h6" stroke="#ef4123" stroke-width="2"/>',
+    'American Express': '<rect width="32" height="24" rx="3" fill="#1675bb"/><text x="16" y="15" text-anchor="middle" font-family="Arial,sans-serif" font-weight="800" font-size="9" fill="white">AMEX</text>'
+  };
+  var mark = marks[brand] || '<rect x="3" y="5" width="26" height="16" rx="3" fill="none" stroke="#718098" stroke-width="2"/><path d="M4 10h24" stroke="#718098" stroke-width="2"/>';
+  return '<span class="brand-label' + (warning ? ' field-warning' : '') + '"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 24">' + mark + '</svg></span>' + escapeHtml(brand || 'Não identificada') + '</span>';
+}
+
+function paymentLabel(tx, row){
+  var mode = tx.modalidade, debit = mode === 'Debito', credit = mode === 'Credito';
+  var icon = debit ? '<path d="M3 7h15v12H3zM6 3h15v12M6 12h9M12 9l3 3-3 3"/>' : '<rect x="2" y="4" width="20" height="16" rx="3"/><path d="M2 9h20M6 15h4"/>';
+  return '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span> <span class="' + (row.installments ? 'field-warning' : 'muted') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
+}
+
+// Cada parcela permanece na origem; apenas a visão por venda é consolidada.
+function parseCardLaunchLines(lines){
+  var data = null, loja = '', out = [];
+  var money = '([\\d.]+,\\d{2})';
+  var rowRe = new RegExp('^(?:(\\d{2}/\\d{2}/\\d{4})\\s+)?(\\d+\\s*-\\s*.+?)\\s+(\\d+)\\s+(\\d+)\\s+' + money + '\\s+' + money + '\\s+' + money + '(?:\\s+(\\d+))?$');
+  lines.forEach(function(line){
+    var store = line.match(/(?:Loja:\s*)?(\d+)\s*-\s*LOJA\b/i);
+    if(store) loja = store[1];
+    if(/^\d{2}\/\d{2}\/\d{4}$/.test(line.trim())) data = parseDateAny(line);
+    var match = line.match(rowRe);
+    if(!match) return;
+    var date = match[1] ? parseDateAny(match[1]) : data;
+    if(!date) throw new Error('Lançamento de cartão sem data: confira o layout do PDF.');
+    data = date;
+    var description = match[2], normalized = normalizeText(description).replace(/^\d+\s*-\s*/, '');
+    var modalidade = detectModalidadeFromText(description);
+    if(/^(MASTERCARD|VISA)$/.test(normalized)) modalidade = 'Credito';
+    out.push({ origem: 'Lançamentos', data: date, loja: loja, registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, descricao: description, raw: line });
+  });
+  var declared = lines.map(function(line){ return line.match(/Total Geral[\s.]*:\s*(\d+)\s+([\d.]+,\d{2})/i); }).find(Boolean);
+  if(!out.length) throw new Error('Nenhum lançamento de cartão reconhecido. Confira o relatório e o período.');
+  if(declared && (Number(declared[1]) !== out.length || cents(parseValorBR(declared[2])) !== cents(sumValues(out)))) throw new Error('A leitura dos Lançamentos não fechou com o total impresso. Confira o layout antes de conciliar.');
+  return out;
+}
+
+function aggregateCardLaunches(lines){
+  var groups = new Map();
+  lines.forEach(function(line){
+    var key = [line.loja, line.data, line.registro, line.nsu, normalizeText(line.descricao)].join('|');
+    if(!groups.has(key)) groups.set(key, Object.assign({}, line, { linhas: [], valor: 0, valorLiquido: 0 }));
+    var group = groups.get(key);
+    group.linhas.push(line);
+    group.valor = (cents(group.valor) + cents(line.valor)) / 100;
+    group.valorLiquido = (cents(group.valorLiquido) + cents(line.valorLiquido)) / 100;
+  });
+  return Array.from(groups.values());
+}
 
 /* =========================================================================
    UTILITIES (tool-specific)
@@ -91,7 +164,8 @@ async function extractPdfLines(file){
 async function detectPdfType(file){
   try{
     var lines = await extractPdfLines(file);
-    var text = lines.slice(0, 80).join(' ').toUpperCase();
+    var text = normalizeText(lines.slice(0, 80).join(' '));
+    if(text.includes('LANCAMENTOS DE CARTAO MAGNETICO POR DATA')) return 'lancamentos';
     if(text.includes('DETALHADO DE VENDAS CIELO')) return 'cielo';
     if(text.includes('RELAÇÃO DE VENDAS POR PERÍODO') || text.includes('RELACAO DE VENDAS POR PERIODO')) return 'caixa';
   }catch(e){
@@ -111,6 +185,7 @@ function parseCaixaLines(lines){
   var lastData = null;
   var lastHora = null;
   var lastDoc = '';
+  var loja = '';
 
   function readLine(line, isExtra){
     isExtra = isExtra || false;
@@ -160,6 +235,8 @@ function parseCaixaLines(lines){
       hora: hora ? parseTimeAny(hora) : null,
       modalidade: modalidade,
       documento: documento,
+      registro: documento,
+      loja: loja,
       valor: valor,
       raw: line
     });
@@ -169,6 +246,8 @@ function parseCaixaLines(lines){
   var pendente = '';
   lines.forEach(function(originalLine){
     var line = originalLine;
+    var store = line.match(/^(\d+)\s*-\s*LOJA\b/i);
+    if(store){ loja = store[1]; return; }
     if(dateRe.test(line)){
       if(pendente) readLine(pendente);
       var re = new RegExp(valorRe.source, 'g');
@@ -186,6 +265,8 @@ function parseCaixaLines(lines){
     }
   });
   if(pendente) readLine(pendente);
+  var printedTotal = lines.map(function(line){ return line.match(/Total Geral[\s.]*:\s*([\d.]+,\d{2})/i); }).find(Boolean);
+  if(printedTotal && cents(parseValorBR(printedTotal[1])) !== cents(sumValues(out))) throw new Error('A leitura da Relação de Vendas não fechou com o total impresso. Confira o layout do PDF.');
   return out;
 }
 
@@ -315,6 +396,10 @@ async function parseCielo(file){
   var colForma = findColIndex(header, ['forma de pagamento', 'forma pagamento', 'bandeira']);
   var colBruto = findColIndex(header, ['valor bruto']);
   var colLiq   = findColIndex(header, ['valor l', 'liquido', 'líquido']);
+  var colBrand = findColIndex(header, ['bandeira']);
+  var colParts = findColIndex(header, ['quantidade total de parcelas', 'parcelas']);
+  var colNsu = findColIndex(header, ['nsu']);
+  var colStatus = findColIndex(header, ['status']);
 
   if(colData === -1 || colForma === -1 || colBruto === -1) throw new Error('Colunas obrigatórias não encontradas no extrato Cielo.');
 
@@ -324,12 +409,16 @@ async function parseCielo(file){
     if(!row || row.every(function(c){ return String(c || '').trim() === ''; })) continue;
     var data = parseDateAny(row[colData]);
     var valorBruto = parseValorBR(row[colBruto]);
+    if(colStatus !== -1 && !/^APROVAD[AO]$/.test(normalizeText(row[colStatus]))) continue;
     if(!data || isNaN(valorBruto)) continue;
     var modalidade = detectModalidadeFromText(String(row[colForma] || ''));
     out.push({
       origem: 'Cielo', data: data,
       hora: colHora !== -1 ? parseTimeAny(row[colHora]) : null,
       modalidade: modalidade, documento: '', valor: valorBruto,
+      bandeira: colBrand !== -1 ? detectBrand(row[colBrand]) : null,
+      parcelas: colParts !== -1 && Number(row[colParts]) > 0 ? Number(row[colParts]) : (/PARCELADO/.test(normalizeText(row[colForma])) ? null : 1),
+      nsu: colNsu !== -1 ? String(row[colNsu] || '') : '',
       valorLiquido: colLiq !== -1 ? parseValorBR(row[colLiq]) : null,
       raw: String(row[colForma] || '')
     });
@@ -358,9 +447,19 @@ function parseCieloPdfLines(lines){
       origem: 'Cielo',
       data: parseDateAny(dateM[1]),
       hora: timeMatch ? parseTimeAny(timeMatch[1]) : null,
-      modalidade: 'Cartao', documento: '', valor: valor, raw: line
+      modalidade: detectModalidadeFromText(line), documento: '', valor: valor, raw: line,
+      bandeira: detectBrand(line),
+      parcelas: /parcelado/i.test(line) ? (line.match(/(\d+)\s*x\b/i) ? Number(line.match(/(\d+)\s*x\b/i)[1]) : null) : 1,
+      valorLiquido: amounts.length >= 3 ? parseValorBR(amounts[2][1]) : null,
+      taxaValor: amounts.length >= 3 ? parseValorBR(amounts[1][1]) : null,
+      estabelecimento: (line.match(/\d{2}:\d{2}\s+(\d+)/) || [])[1] || '',
+      cnpj: (line.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/) || [])[0] || ''
     });
   });
+  var totalizer = lines.map(function(line){ return line.match(/^(\d+)\s+R\$\s*([\d.]+,\d{2})\s+-?R\$/); }).find(Boolean);
+  // O totalizador só serve de controle quando todas as linhas são aprovadas.
+  var hasOtherStatus = lines.some(function(line){ return /\d{2}\/\d{2}\/\d{4}/.test(line) && /R\$/.test(line) && !/\bAPROVADA\b/i.test(line); });
+  if(totalizer && !hasOtherStatus && (Number(totalizer[1]) !== out.length || cents(parseValorBR(totalizer[2])) !== cents(sumValues(out)))) throw new Error('A leitura da Cielo não fechou com o totalizador. Confira o layout do PDF.');
   return out;
 }
 
@@ -404,10 +503,45 @@ function matchModalidade(caixaList, bankList){
   return { matched: matched, divergValor: divergValor, ausentes: caixaRemain, sobras: bankRemain };
 }
 
+function matchCardTransactions(caixaList, bankList){
+  var left = caixaList.slice(), right = bankList.slice(), matched = [], divergValor = [];
+  function pairPass(requireValue){
+    var changed = true;
+    while(changed){
+      changed = false;
+      function candidates(c){
+        return right.map(function(b){
+          if(c.data !== b.data || (requireValue && cents(c.valor) !== cents(b.valor))) return null;
+          var distance = c.hora && b.hora ? timeDiffMinutes(c.hora, b.hora) : Infinity;
+          if(!requireValue && distance > 2) return null;
+          return { caixa: c, banco: b, distance: distance };
+        }).filter(Boolean).sort(function(a,b){ return a.distance - b.distance; });
+      }
+      for(var i = 0; i < left.length; i++){
+        var choices = candidates(left[i]);
+        if(!choices.length || (choices.length > 1 && choices[0].distance === choices[1].distance)) continue;
+        var choice = choices[0];
+        var competitors = left.filter(function(c){
+          return c !== choice.caixa && c.data === choice.banco.data && (!requireValue || cents(c.valor) === cents(choice.banco.valor)) && ((!c.hora || !choice.banco.hora) ? Infinity : timeDiffMinutes(c.hora, choice.banco.hora)) <= choice.distance;
+        });
+        if(competitors.length) continue;
+        // Horários distantes não confirmam identidade, mesmo com valor único.
+        choice.confidence = choice.distance <= 2 ? 'horario' : 'valor';
+        (requireValue ? matched : divergValor).push(choice);
+        left.splice(i, 1); right.splice(right.indexOf(choice.banco), 1);
+        changed = true; break;
+      }
+    }
+  }
+  pairPass(true);
+  pairPass(false);
+  return { matched: matched, divergValor: divergValor, ausentes: left, sobras: right };
+}
+
 function reconcile(caixaTx, sicrediTx, cieloTx){
   var bancoTx = cieloTx.length ? cieloTx : sicrediTx;
   var origem = cieloTx.length ? 'Cielo' : 'Extrato PIX';
-  var resultado = matchModalidade(caixaTx, bancoTx);
+  var resultado = cieloTx.length ? matchCardTransactions(caixaTx, bancoTx) : matchModalidade(caixaTx, bancoTx);
   var divergences = [];
 
   function pushDiverg(tipo, item, modalidadeLabel){
@@ -440,7 +574,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
   resultado.ausentes.forEach(function(item){ pushDiverg('ausente_banco', item, origem); });
   resultado.sobras.forEach(function(item){ pushDiverg('sobra_banco', item, origem); });
 
-  function sumBy(list){ return list.reduce(function(s,t){ return s + t.valor; }, 0); }
+  function sumBy(list){ return sumValues(list); }
 
   var summary = [{
     modalidade: 'Caixa × ' + origem,
@@ -448,7 +582,40 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
     batidos: resultado.matched.length, totalCaixaCount: caixaTx.length
   }];
 
-  return { divergences: divergences, summary: summary };
+  return { divergences: divergences, summary: summary, pairs: resultado };
+}
+
+function buildCardAudit(caixa, launchLines, cielo, pairs){
+  var groups = aggregateCardLaunches(launchLines), used = new Set(), rows = [];
+  caixa.forEach(function(sale){
+    var internal = groups.filter(function(g){ return g.registro === sale.registro && g.data === sale.data && g.loja === sale.loja; });
+    var pair = pairs.matched.concat(pairs.divergValor).find(function(p){ return p.caixa === sale; });
+    var issues = [], launch = internal.length === 1 ? internal[0] : null;
+    if(caixa.filter(function(other){ return other.data === sale.data && other.loja === sale.loja && other.registro === sale.registro; }).length > 1) issues.push('Registro repetido na Relação');
+    internal.forEach(function(g){ used.add(g); });
+    if(internal.length === 0) issues.push('Sem lançamento interno');
+    if(internal.length > 1) issues.push('Mais de um lançamento para o registro');
+    if(launch && cents(launch.valor) !== cents(sale.valor)) issues.push('Valor interno divergente');
+    if(launch && (launch.linhas.length !== launch.parcelas || launch.linhas.some(function(l){ return l.parcelas !== launch.parcelas; }))) issues.push('Parcelas internas incompletas ou repetidas');
+    if(!pair) issues.push('Sem correspondência segura na Cielo');
+    if(pair && pair.confidence !== 'horario') issues.push('Conferir vínculo: apenas data e valor');
+    if(pair && cents(sale.valor) !== cents(pair.banco.valor)) issues.push('Valor Cielo divergente');
+    var reliable = issues.length === 0 && launch && pair;
+    var brand = false, mode = false, installments = false;
+    if(reliable){
+      if(!launch.bandeira || !pair.banco.bandeira) issues.push('Bandeira não identificada');
+      else if(launch.bandeira !== pair.banco.bandeira){ brand = true; issues.push('Bandeira divergente'); }
+      if(!/^(Debito|Credito)$/.test(launch.modalidade) || !/^(Debito|Credito)$/.test(pair.banco.modalidade)) issues.push('Modalidade não identificada');
+      else if(launch.modalidade !== pair.banco.modalidade){ mode = true; issues.push('Débito / crédito divergente'); }
+      if(!launch.parcelas || !pair.banco.parcelas) issues.push('Parcelas não identificadas');
+      else if(launch.parcelas !== pair.banco.parcelas){ installments = true; issues.push('Parcelas divergentes'); }
+    }
+    rows.push({ sale: sale, launch: launch, bank: pair ? pair.banco : null, issues: issues, brand: brand, mode: mode, installments: installments, internalOK: internal.length === 1 && launch && cents(launch.valor) === cents(sale.valor), confidence: pair ? pair.confidence : null });
+  });
+  groups.filter(function(g){ return !used.has(g); }).forEach(function(g){ rows.push({ sale: null, launch: g, bank: null, issues: ['Lançamento sem venda na Relação'], internalOK: false }); });
+  pairs.sobras.forEach(function(b){ rows.push({ sale: null, launch: null, bank: b, issues: ['Venda Cielo sem correspondência segura'], internalOK: false }); });
+  rows.sort(function(a,b){ var x = a.sale || a.launch || a.bank, y = b.sale || b.launch || b.bank; return (x.data + (x.hora || '') + (x.registro || '')).localeCompare(y.data + (y.hora || '') + (y.registro || '')); });
+  return { rows: rows, groups: groups, lineCount: launchLines.length, internalCount: rows.filter(function(r){ return r.internalOK; }).length };
 }
 
 /* =========================================================================
@@ -456,6 +623,14 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
    ========================================================================= */
 var dropzone = document.getElementById('dropzone');
 var fileInput = document.getElementById('fileInput');
+document.getElementById('btnAddDetails').addEventListener('click', function(){ fileInput.click(); });
+
+function invalidateResults(){
+  state.processedOnce = false;
+  state.cardAudit = null;
+  document.getElementById('resultsWrap').classList.remove('show');
+  document.getElementById('btnExport').disabled = true;
+}
 
 dropzone.addEventListener('click', function(){ fileInput.click(); });
 dropzone.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' ') fileInput.click(); });
@@ -485,8 +660,8 @@ async function handleIncomingFiles(files){
       var ext = file.name.split('.').pop().toLowerCase();
       if(ext === 'pdf'){
         var type = await detectPdfType(file);
-        if(type === 'caixa' || type === 'cielo'){
-          if(type === 'cielo' && state.files.sicredi.length > 0){
+        if(type === 'caixa' || type === 'cielo' || type === 'lancamentos'){
+          if((type === 'cielo' || type === 'lancamentos') && state.files.sicredi.length > 0){
             showToast('Use somente um comparativo por vez: Cielo ou Extrato PIX.', true);
           } else {
             assignFile(type, file);
@@ -500,7 +675,7 @@ async function handleIncomingFiles(files){
           if(state.files.sicredi.length > 0) showToast('Use somente um comparativo por vez: Cielo ou Extrato PIX.', true);
           else assignFile('cielo', file);
         } else if(type2 === 'sicredi'){
-          if(state.files.cielo.length > 0) showToast('Use somente um comparativo por vez: Cielo ou Extrato PIX.', true);
+          if(state.files.cielo.length > 0 || state.files.lancamentos.length > 0) showToast('Remova os arquivos de cartões para usar o extrato PIX.', true);
           else assignFile('sicredi', file);
         } else {
           showToast('Não foi possível identificar o tipo de "' + file.name + '". Verifique o layout do arquivo.', true);
@@ -516,6 +691,10 @@ async function handleIncomingFiles(files){
 }
 
 function assignFile(slot, file){
+  if(state.files[slot].some(function(f){ return f.name === file.name && f.size === file.size && f.lastModified === file.lastModified; })){
+    showToast('Este arquivo já foi adicionado.', true); return;
+  }
+  invalidateResults();
   state.files[slot].push(file);
   var el = document.getElementById('slot-' + slot);
   el.classList.remove('empty');
@@ -526,10 +705,12 @@ function assignFile(slot, file){
     el.querySelector('.fs-name').textContent = state.files[slot].length + ' arquivos';
   }
   el.querySelector('.fs-status').textContent = 'Pronto para processar';
+  el.querySelector('.fs-icon').textContent = file.name.split('.').pop().toUpperCase();
   el.querySelector('.fs-remove').style.display = 'inline-flex';
 }
 
 function clearSlot(slot){
+  invalidateResults();
   state.files[slot] = [];
   var el = document.getElementById('slot-' + slot);
   el.classList.remove('filled');
@@ -560,8 +741,13 @@ function updateProcessButtonState(){
   } else if(!hasComparativo){
     hint.textContent = 'Envie o "Detalhado de vendas Cielo" ou a planilha de extrato PIX.';
   } else {
-    hint.textContent = 'Arquivos prontos. A conciliação mostrará somente o que não bate.';
+    hint.textContent = state.files.lancamentos.length ? 'Conferência detalhada pronta: valores, bandeiras, débito/crédito e parcelas.' : 'Conciliação de valores pronta. O relatório de lançamentos é opcional.';
   }
+  document.getElementById('btnAddDetails').hidden = state.files.lancamentos.length > 0;
+  document.querySelector('.detail-upload').classList.toggle('is-ready', state.files.lancamentos.length > 0);
+  document.getElementById('slot-sicredi').hidden = state.files.cielo.length > 0;
+  document.getElementById('slot-cielo').hidden = state.files.sicredi.length > 0;
+  document.querySelector('.file-slots').classList.toggle('has-comparative', hasComparativo);
 }
 
 /* =========================================================================
@@ -570,7 +756,8 @@ function updateProcessButtonState(){
 document.getElementById('btnProcess').addEventListener('click', async function(){
   showOverlay('Lendo arquivos…');
   try{
-    var caixaTx = [], sicrediTx = [], cieloTx = [];
+    var caixaTx = [], sicrediTx = [], cieloTx = [], launchTx = [];
+    invalidateResults();
 
     if(state.files.caixa.length === 0 || (state.files.sicredi.length === 0 && state.files.cielo.length === 0)){
       throw new Error('Envie relatórios do Caixa e arquivos de um comparativo.');
@@ -599,11 +786,23 @@ document.getElementById('btnProcess').addEventListener('click', async function()
       }
     }
 
+    if(!caixaTx.length || !(cieloTx.length || sicrediTx.length)) throw new Error('Um dos relatórios não contém vendas reconhecidas. Confira o período e o formato.');
+    if(state.files.lancamentos.length){
+      if(!cieloTx.length) throw new Error('A conferência de cartões precisa do relatório Cielo.');
+      showOverlay('Consolidando parcelas e conferindo os lançamentos…');
+      for(var li = 0; li < state.files.lancamentos.length; li++) launchTx = launchTx.concat(parseCardLaunchLines(await extractPdfLines(state.files.lancamentos[li])));
+      if(new Set(caixaTx.map(function(t){ return t.loja; })).size > 1 || new Set(cieloTx.map(function(t){ return t.cnpj || t.estabelecimento || ''; })).size > 1) throw new Error('Para conferir os cartões, envie os relatórios de uma única loja por vez.');
+    }
+
     showOverlay('Cruzando transações…');
-    state.parsed = { caixa: caixaTx, sicredi: sicrediTx, cielo: cieloTx };
+    state.parsed = { caixa: caixaTx, sicredi: sicrediTx, cielo: cieloTx, lancamentos: launchTx };
     var result = reconcile(caixaTx, sicrediTx, cieloTx);
     state.divergences = result.divergences;
     state.summary = result.summary;
+    state.pairs = result.pairs;
+    state.cardAudit = launchTx.length ? buildCardAudit(caixaTx, launchTx, cieloTx, result.pairs) : null;
+    state.cardFilter = 'pending';
+    document.getElementById('cardSearch').value = '';
     state.processedOnce = true;
 
     renderResults();
@@ -623,6 +822,13 @@ function renderResults(){
   document.getElementById('resultsWrap').classList.add('show');
 
   var caixa = state.parsed.caixa, sicredi = state.parsed.sicredi, cielo = state.parsed.cielo;
+  document.getElementById('mSicredi').closest('.metric-card').hidden = cielo.length > 0;
+  document.getElementById('mCielo').closest('.metric-card').hidden = !cielo.length;
+  document.getElementById('analysisMode').textContent = state.cardAudit ? 'Conferência detalhada · 3 relatórios' : 'Conciliação de valores';
+  document.getElementById('analysisScope').textContent = state.cardAudit ? 'Valores + dados dos cartões' : 'Bandeira e modalidade internas não verificadas';
+  if(!cielo.length) document.getElementById('analysisScope').textContent = 'Recebimentos PIX';
+  document.getElementById('tab-cards').hidden = !state.cardAudit;
+  selectResultView('overview');
   document.getElementById('mCaixa').textContent = fmtBRL(caixa.reduce(function(s,t){ return s+t.valor; },0));
   document.getElementById('mCaixaSub').textContent = caixa.length + ' lançamentos';
   document.getElementById('mSicredi').textContent = fmtBRL(sicredi.reduce(function(s,t){ return s+t.valor; },0));
@@ -633,13 +839,21 @@ function renderResults(){
   var statusEl = document.getElementById('mStatus');
   var statusSub = document.getElementById('mStatusSub');
   if(state.divergences.length === 0){
-    statusEl.textContent = 'Conciliado';
+    statusEl.textContent = 'Valores conciliados';
     statusEl.className = 'status-badge ok';
     statusSub.textContent = 'Todas as transações foram batidas';
   } else {
     statusEl.textContent = 'Divergente';
     statusEl.className = 'status-badge bad';
     statusSub.textContent = state.divergences.length + ' pendência(s) encontrada(s)';
+  }
+  if(state.cardAudit){
+    var pending = state.cardAudit.rows.filter(function(r){ return r.issues.length; }).length;
+    if(pending){ statusEl.textContent = 'Conferir cartões'; statusEl.className = 'status-badge review'; statusSub.textContent = pending + ' venda(s) com pendências nos detalhes'; }
+    document.getElementById('valueEmptyNote').textContent = pending ? 'Os valores batem. Há ' + pending + ' venda(s) para revisar na aba Detalhes dos cartões.' : 'Valores e dados dos cartões conferidos nos relatórios enviados.';
+    renderCardAudit();
+  } else {
+    document.getElementById('valueEmptyNote').textContent = 'Nenhuma divergência de valor encontrada. Adicione os Lançamentos para conferir os dados internos dos cartões.';
   }
 
   document.getElementById('lastRunLabel').textContent = 'Processado em ' + new Date().toLocaleString('pt-BR');
@@ -652,7 +866,7 @@ function renderResults(){
     if(row.info){
       tr.innerHTML = '<td><strong>' + row.modalidade + '</strong> <span style="font-size:11px;color:var(--gray-400);font-weight:500;">(sem comparação bancária)</span></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">—</td><td class="num diff-zero">—</td><td class="num">' + row.totalCaixaCount + '</td>';
     } else {
-      var diff = row.caixa - row.banco;
+      var diff = (cents(row.caixa) - cents(row.banco)) / 100;
       var diffClass = Math.abs(diff) < 0.01 ? 'diff-zero' : (diff > 0 ? 'diff-neg' : 'diff-pos');
       tr.innerHTML = '<td><strong>' + row.modalidade + '</strong></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">' + fmtBRL(row.banco) + '</td><td class="num ' + diffClass + '">' + fmtBRL(diff) + '</td><td class="num">' + row.batidos + '/' + row.totalCaixaCount + '</td>';
     }
@@ -683,26 +897,11 @@ function renderResults(){
   var comparativoNome = cielo.length ? 'Cielo' : 'Extrato PIX';
   document.getElementById('sourceBTitle').textContent = 'B · ' + comparativoNome;
   document.getElementById('sourceBNote').textContent = cielo.length
-    ? 'Vendas aprovadas extraídas do relatório "Detalhado de vendas Cielo". Valores iguais ficam na mesma linha do Caixa.'
+    ? 'Vendas aprovadas da Cielo. O cruzamento usa data, valor e proximidade de horário; os pares são os mesmos da conciliação. Sem vínculo único, a venda fica sem correspondência.'
     : 'Somente lançamentos "RECEBIMENTO PIX" extraídos da planilha. Valores iguais ficam na mesma linha do Caixa.';
 
   function escapeHtml(value){
     return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-  function sortTransactions(list){
-    return list.slice().sort(function(a,b){ return ((a.data||'')+(a.hora||'')).localeCompare((b.data||'')+(b.hora||'')); });
-  }
-  function alignTransactions(leftList, rightList){
-    var rightRemaining = sortTransactions(rightList);
-    var aligned = [];
-    sortTransactions(leftList).forEach(function(left){
-      var index = rightRemaining.findIndex(function(right){
-        return isDateMatch(left, right) && Math.abs(left.valor - right.valor) <= 0.009;
-      });
-      aligned.push({ left: left, right: index >= 0 ? rightRemaining.splice(index, 1)[0] : null });
-    });
-    rightRemaining.forEach(function(right){ aligned.push({ left: null, right: right }); });
-    return aligned;
   }
   var countA = 0, countB = 0;
   function sourceCells(t, divider){
@@ -712,14 +911,17 @@ function renderResults(){
     var raw = t.raw || '—';
     return '<td class="num' + dividerClass + '" style="color:var(--gray-400);font-size:11px;text-align:center;">' + num + '</td><td class="mono" style="text-align:center;">' + (t.data ? formatDateBR(t.data) : '—') + '</td><td class="mono" style="text-align:center;">' + (t.hora || '—') + '</td><td class="mono" style="text-align:center;">' + escapeHtml(t.documento || '—') + '</td><td class="num">' + fmtBRL(t.valor) + '</td><td class="raw" title="' + escapeHtml(raw) + '">' + escapeHtml(raw) + '</td>';
   }
-  var alignedRows = alignTransactions(caixa, comparativo);
+  var alignedRows = state.pairs.matched.concat(state.pairs.divergValor).map(function(p){ return { left: p.caixa, right: p.banco, confidence: p.confidence }; });
+  state.pairs.ausentes.forEach(function(t){ alignedRows.push({ left: t, right: null }); });
+  state.pairs.sobras.forEach(function(t){ alignedRows.push({ left: null, right: t }); });
+  alignedRows.sort(function(a,b){ var x = a.left || a.right, y = b.left || b.right; return (x.data + (x.hora || '')).localeCompare(y.data + (y.hora || '')); });
   state.alignedRows = alignedRows;
   document.getElementById('sourceCompareCount').textContent = alignedRows.length + ' linhas';
   var compareBody = document.getElementById('sourceCompareBody');
   compareBody.innerHTML = '';
   var hasDivergences = false;
   alignedRows.forEach(function(row){
-    var isDivergent = !row.left || !row.right;
+    var isDivergent = !row.left || !row.right || cents(row.left.valor) !== cents(row.right.valor);
     if(isDivergent) hasDivergences = true;
     var tr = document.createElement('tr');
     if(isDivergent) tr.classList.add('has-divergence');
@@ -732,6 +934,99 @@ function renderResults(){
   document.getElementById('btnExportCompare').style.display = alignedRows.length > 0 ? 'inline-flex' : 'none';
   window._concDivIdx = -1;
 }
+
+function selectResultView(view){
+  document.querySelectorAll('[data-view]').forEach(function(button){
+    var active = button.dataset.view === view;
+    button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+    document.getElementById('view-' + button.dataset.view).hidden = !active;
+  });
+}
+document.querySelectorAll('[data-view]').forEach(function(button){
+  button.addEventListener('click', function(){ selectResultView(button.dataset.view); });
+  button.addEventListener('keydown', function(event){
+    if(!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    var tabs = Array.from(document.querySelectorAll('[data-view]')).filter(function(tab){ return !tab.hidden; });
+    var index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (tabs.indexOf(button) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    selectResultView(tabs[index].dataset.view); tabs[index].focus();
+  });
+});
+
+function cardGroups(){
+  var groups = new Map();
+  function add(list, side){ list.forEach(function(tx){
+    var key = (tx.bandeira || 'Não identificada') + ' · ' + (MODAL_LABEL[tx.modalidade] || 'Não identificado');
+    if(!groups.has(key)) groups.set(key, { categoria: key, sistema: 0, cielo: 0, qtdSistema: 0, qtdCielo: 0 });
+    var g = groups.get(key); g[side] += cents(tx.valor); g[side === 'sistema' ? 'qtdSistema' : 'qtdCielo']++;
+  }); }
+  add(state.cardAudit.groups, 'sistema'); add(state.parsed.cielo, 'cielo');
+  return Array.from(groups.values()).sort(function(a,b){ return a.categoria.localeCompare(b.categoria); });
+}
+
+function renderCardAudit(){
+  var audit = state.cardAudit, rows = audit.rows;
+  var pending = rows.filter(function(r){ return r.issues.length; });
+  document.getElementById('cardTabCount').textContent = pending.length;
+  var metrics = [
+    ['Vendas conferidas', rows.filter(function(r){ return !r.issues.length; }).length, state.parsed.caixa.length + ' vendas na Relação', 'good'],
+    ['Bandeira divergente', rows.filter(function(r){ return r.brand; }).length, 'Sistema diferente da Cielo', 'warn'],
+    ['Débito / crédito', rows.filter(function(r){ return r.mode; }).length, 'Modalidade divergente', 'warn'],
+    ['Outras pendências', rows.filter(function(r){ return r.issues.length && !r.brand && !r.mode; }).length, 'Parcelas, valores ou vínculo', 'neutral']
+  ];
+  document.getElementById('cardMetrics').innerHTML = metrics.map(function(m){ return '<div class="detail-metric ' + m[3] + '"><span>' + m[0] + '</span><strong>' + m[1] + '</strong><small>' + m[2] + '</small></div>'; }).join('');
+  var integrityOK = audit.internalCount === state.parsed.caixa.length && audit.groups.length === state.parsed.caixa.length && !rows.some(function(r){ return r.issues.some(function(i){ return /internas|interno|registro|Relação/.test(i); }); });
+  var banner = document.getElementById('cardIntegrity');
+  banner.className = 'integrity-banner ' + (integrityOK ? 'good' : 'warn');
+  banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos consistentes' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas consolidadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros fecham em valor com a Relação. Total dos lançamentos: ' + fmtBRL(sumValues(audit.groups)) + '.</p></div>';
+  document.getElementById('cardGroupBody').innerHTML = cardGroups().map(function(g){ return '<tr><td>' + escapeHtml(g.categoria) + '</td><td class="num">' + g.qtdSistema + '</td><td class="num">' + fmtBRL(g.sistema / 100) + '</td><td class="num">' + g.qtdCielo + '</td><td class="num">' + fmtBRL(g.cielo / 100) + '</td><td class="num ' + (g.sistema === g.cielo ? 'diff-zero' : 'diff-neg') + '">' + fmtBRL((g.sistema - g.cielo) / 100) + '</td></tr>'; }).join('');
+  var netSystem = sumValues(audit.groups, 'valorLiquido'), netBank = sumValues(state.parsed.cielo, 'valorLiquido');
+  var bankHasNet = state.parsed.cielo.every(function(t){ return Number.isFinite(t.valorLiquido); });
+  document.getElementById('cardNetSummary').innerHTML = '<div><span>Líquido previsto · sistema</span><strong>' + fmtBRL(netSystem) + '</strong></div><div><span>Líquido · Cielo</span><strong>' + (bankHasNet ? fmtBRL(netBank) : 'Não disponível') + '</strong></div><div><span>Diferença · Cielo − sistema</span><strong>' + (bankHasNet ? fmtBRL((cents(netBank) - cents(netSystem)) / 100) : '—') + '</strong></div><div><span>Taxas · Cielo</span><strong>' + (bankHasNet ? fmtBRL((cents(sumValues(state.parsed.cielo)) - cents(netBank)) / 100) : '—') + '</strong></div>';
+  renderCardRows();
+}
+
+function renderCardRows(){
+  if(!state.cardAudit) return;
+  var query = normalizeText(document.getElementById('cardSearch').value);
+  var rows = state.cardAudit.rows.filter(function(r){
+    var filterOK = state.cardFilter === 'all' || (state.cardFilter === 'pending' ? r.issues.length > 0 : !!r[state.cardFilter]);
+    return filterOK && (!query || normalizeText(JSON.stringify([r.sale, r.launch && Object.assign({}, r.launch, { linhas: undefined }), r.bank, r.issues])).includes(query));
+  });
+  document.querySelectorAll('[data-card-filter]').forEach(function(button){ var active = button.dataset.cardFilter === state.cardFilter; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+  function cardCell(tx, row){
+    if(!tx) return '<span class="muted">Não identificado</span>';
+    return brandLabel(tx.bandeira, row.brand) + paymentLabel(tx, row) + '<small>' + (tx.hora ? 'Hora Cielo ' + escapeHtml(tx.hora) : 'NSU ' + escapeHtml(tx.nsu || 'não informado')) + '</small>';
+  }
+  document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
+    var tx = r.sale || r.launch || r.bank;
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small></td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return '<span class="audit-issue">' + escapeHtml(issue) + '</span>'; }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
+  }).join('');
+  document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
+  document.getElementById('cardEmpty').hidden = rows.length > 0;
+}
+document.querySelectorAll('[data-card-filter]').forEach(function(button){ button.addEventListener('click', function(){ state.cardFilter = button.dataset.cardFilter; renderCardRows(); }); });
+document.getElementById('cardSearch').addEventListener('input', renderCardRows);
+
+document.getElementById('btnExportDetails').addEventListener('click', function(){
+  if(!state.cardAudit) return;
+  var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank; return {
+    'Data': tx.data ? formatDateBR(tx.data) : '', 'Registro': (r.sale || r.launch || {}).registro || '',
+    'Hora sistema': r.sale && r.sale.hora || '', 'Hora Cielo': r.bank && r.bank.hora || '', 'NSU interno': r.launch && r.launch.nsu || '',
+    'Valor Relação': r.sale ? r.sale.valor : '', 'Valor Lançamentos': r.launch ? r.launch.valor : '', 'Valor Cielo': r.bank ? r.bank.valor : '',
+    'Bandeira sistema': r.launch && r.launch.bandeira || '', 'Bandeira Cielo': r.bank && r.bank.bandeira || '',
+    'Modalidade sistema': r.launch ? MODAL_LABEL[r.launch.modalidade] : '', 'Modalidade Cielo': r.bank ? MODAL_LABEL[r.bank.modalidade] : '',
+    'Parcelas sistema': r.launch && r.launch.parcelas || '', 'Parcelas Cielo': r.bank && r.bank.parcelas || '',
+    'Líquido previsto sistema': r.launch ? r.launch.valorLiquido : '', 'Líquido Cielo': r.bank ? r.bank.valorLiquido : '',
+    'Conferência': r.issues.join('; ') || 'Conferido', 'Vínculo': r.confidence === 'horario' ? 'Data e horário próximo' : 'Revisar',
+    'Origem Relação': r.sale && r.sale.raw || '', 'Origem Lançamentos': r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : '', 'Origem Cielo': r.bank && r.bank.raw || ''
+  }; });
+  var wb = XLSX.utils.book_new();
+  var ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = Object.keys(rows[0] || {}).map(function(){ return { wch: 24 }; });
+  XLSX.utils.book_append_sheet(wb, ws, 'Conferência de cartões');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cardGroups().map(function(g){ return { 'Categoria': g.categoria, 'Vendas sistema': g.qtdSistema, 'Total sistema': g.sistema / 100, 'Vendas Cielo': g.qtdCielo, 'Total Cielo': g.cielo / 100, 'Diferença': (g.sistema - g.cielo) / 100 }; })), 'Totais por categoria');
+  XLSX.writeFile(wb, 'conferencia_cartoes_' + new Date().toISOString().slice(0,10) + '.xlsx');
+});
 
 function badgeFor(tipo){
   if(tipo === 'ausente_banco') return '<span class="badge b-red"><span class="badge-dot"></span>Ausente no banco</span>';
@@ -798,7 +1093,7 @@ document.getElementById('btnExportCompare').addEventListener('click', function()
       'Banco - Documento': right && right.documento ? right.documento : '—',
       'Banco - Valor (R$)': right && right.valor !== null ? Number(right.valor.toFixed(2)) : '',
       'Banco - Linha Lida': right && right.raw ? right.raw : '—',
-      'Status': (!left || !right) ? 'Divergente' : 'Batido'
+      'Status': (!left || !right || cents(left.valor) !== cents(right.valor)) ? 'Divergente' : 'Valor batido'
     };
   });
   var ws = XLSX.utils.json_to_sheet(rows);
@@ -816,7 +1111,10 @@ document.getElementById('btnReset').addEventListener('click', function(){
   clearSlot('caixa');
   clearSlot('sicredi');
   clearSlot('cielo');
-  state.parsed = { caixa: [], sicredi: [], cielo: [] };
+  clearSlot('lancamentos');
+  state.parsed = { caixa: [], sicredi: [], cielo: [], lancamentos: [] };
+  state.cardAudit = null;
+  state.pairs = null;
   state.divergences = [];
   state.summary = [];
   state.alignedRows = [];

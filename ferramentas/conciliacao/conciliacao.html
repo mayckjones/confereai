@@ -12,7 +12,8 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <h3>Arraste os arquivos aqui</h3>
-    <p>ou <span class="browse">clique para selecionar</span> — envie 2 arquivos: Caixa + Cielo, ou Caixa + PIX. O tipo é detectado automaticamente.</p>
+    <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + Cielo (ou extrato PIX).</p>
+    <p class="dz-extra">Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Identificamos cada relatório automaticamente.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -20,7 +21,7 @@
     <div class="file-slot caixa empty" id="slot-caixa">
       <div class="fs-icon">PDF</div>
       <div class="fs-body">
-        <div class="fs-label">Relatório de Caixa</div>
+        <div class="fs-label">Relação de Vendas · Caixa</div>
         <div class="fs-name">Nenhum arquivo</div>
         <div class="fs-status">Aguardando envio</div>
       </div>
@@ -46,6 +47,16 @@
     </div>
   </div>
 
+  <div class="detail-upload">
+    <div class="detail-upload-copy"><span class="detail-eyebrow">CONFERÊNCIA ADICIONAL</span><h3>Um relatório a mais. Uma visão mais completa.</h3><p>Confira como a farmácia registrou a bandeira, o débito ou crédito e as parcelas de cada venda.</p></div>
+    <div class="file-slot lancamentos empty" id="slot-lancamentos">
+      <div class="fs-icon">PDF</div>
+      <div class="fs-body"><div class="fs-label">Lançamentos de Cartão Magnético <span class="optional-label">Opcional</span></div><div class="fs-name">Nenhum arquivo</div><div class="fs-status">Adicione para detalhar a conciliação Cielo</div></div>
+      <button class="fs-remove" data-slot="lancamentos" title="Remover lançamentos" style="display:none;">✕</button>
+      <button class="btn btn-ghost" id="btnAddDetails">Adicionar</button>
+    </div>
+  </div>
+
   <div class="actions-row">
     <button class="btn btn-primary" id="btnProcess" disabled>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -64,6 +75,14 @@
 
   <!-- RESULTS -->
   <div class="results-wrap" id="resultsWrap">
+
+    <div class="result-context"><span class="badge b-blue" id="analysisMode">Conciliação de valores</span><span id="analysisScope">Valores brutos de venda</span></div>
+    <div class="result-tabs" role="tablist" aria-label="Visões da conciliação">
+      <button id="tab-overview" role="tab" aria-selected="true" aria-controls="view-overview" data-view="overview" class="active">Visão geral</button>
+      <button id="tab-cards" role="tab" aria-selected="false" aria-controls="view-cards" data-view="cards" tabindex="-1" hidden>Detalhes dos cartões <span id="cardTabCount">0</span></button>
+      <button id="tab-source" role="tab" aria-selected="false" aria-controls="view-source" data-view="source" tabindex="-1">Vendas lidas</button>
+    </div>
+    <div id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
 
     <div class="section-head">
       <h2>2. Visão geral</h2>
@@ -114,7 +133,7 @@
 
     <div class="section-head">
       <h2>4. Divergências</h2>
-      <span class="sub">Somente vendas sem correspondência por data e valor</span>
+      <span class="sub">Conferência dos valores de venda</span>
     </div>
 
     <div class="panel">
@@ -148,11 +167,30 @@
         <div class="es-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <h4>Tudo conciliado</h4>
-        <p>Nenhuma divergência encontrada entre caixa, Sicredi e Cielo.</p>
+        <h4>Valores conciliados</h4>
+        <p id="valueEmptyNote">Nenhuma divergência de valor encontrada entre os arquivos comparados.</p>
       </div>
     </div>
 
+    </div>
+
+    <div id="view-cards" role="tabpanel" aria-labelledby="tab-cards" hidden>
+      <div class="detail-heading"><div><span class="detail-eyebrow">SISTEMA × CIELO</span><h2>Cada cartão, conferido lado a lado.</h2><p>Bandeira, modalidade e parcelas comparadas em cada venda identificada.</p></div><button class="btn btn-ghost" id="btnExportDetails">Exportar detalhes (.xlsx)</button></div>
+      <div class="detail-metrics" id="cardMetrics"></div>
+      <div class="integrity-banner" id="cardIntegrity" role="status"></div>
+      <div class="panel detail-panel">
+        <div class="panel-head"><h3>Conferência por venda</h3><span class="count" id="cardVisibleCount"></span></div>
+        <div class="detail-toolbar"><div class="detail-filters" role="group" aria-label="Filtrar conferência"><button class="active" data-card-filter="pending" aria-pressed="true">Pendências</button><button data-card-filter="all" aria-pressed="false">Todas</button><button data-card-filter="brand" aria-pressed="false">Bandeira</button><button data-card-filter="mode" aria-pressed="false">Débito / crédito</button><button data-card-filter="installments" aria-pressed="false">Parcelas</button></div><label class="detail-search"><span>Buscar</span><input id="cardSearch" type="search" placeholder="Registro, NSU, bandeira…"></label></div>
+        <div class="table-scroll"><table class="card-audit-table"><thead><tr><th>Venda / registro</th><th class="num">Valor bruto</th><th>No sistema</th><th>Na Cielo</th><th>Conferência</th></tr></thead><tbody id="cardAuditBody"></tbody></table></div>
+        <div class="empty-state" id="cardEmpty" hidden><h4>Nenhuma venda neste filtro</h4><p>Experimente visualizar todas as vendas ou ajustar a busca.</p></div>
+        <div class="source-note">Bandeira e modalidade são conferidas depois de identificar a venda. Valores iguais sem vínculo seguro ficam pendentes. Débito pré-pago é comparado como débito; a descrição original é preservada.</div>
+      </div>
+      <details class="detail-disclosure"><summary>Totais por bandeira e modalidade <span>Comparar distribuição</span></summary><div class="table-scroll"><table><thead><tr><th>Categoria</th><th class="num">Vendas sistema</th><th class="num">Sistema</th><th class="num">Vendas Cielo</th><th class="num">Cielo</th><th class="num">Diferença</th></tr></thead><tbody id="cardGroupBody"></tbody></table></div></details>
+      <details class="detail-disclosure"><summary>Taxas e líquido previsto <span>Conferência complementar</span></summary><div id="cardNetSummary" class="net-summary"></div><p class="detail-footnote">O líquido do sistema é uma previsão. Os valores da Cielo representam o relatório de vendas, não a confirmação de depósito bancário. Devoluções, cancelamentos e recebimentos precisam de seus próprios relatórios.</p></details>
+      <p class="detail-footnote">Nos cadastros internos deste modelo, “MASTERCARD” e “VISA” sem “DÉBITO” são interpretados como crédito. Outras descrições sem modalidade explícita ficam como não identificadas.</p>
+    </div>
+
+    <div id="view-source" role="tabpanel" aria-labelledby="tab-source" hidden>
     <div class="section-head">
       <h2>5. Lançamentos lidos para comparação</h2>
       <span class="sub">Lado A e Lado B — somente na sua tela, nada é enviado</span>
@@ -181,6 +219,8 @@
         </thead>
         <tbody id="sourceCompareBody"></tbody>
       </table></div>
+    </div>
+
     </div>
 
   </div>
