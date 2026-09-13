@@ -673,6 +673,135 @@ window.__tool_init_recibos = function() {
   // =========================================================================
   // IMPORTAÇÃO DE ARQUIVOS VIA XLSX
   // =========================================================================
+  function normalizarCabecalhoImportacao(value) {
+    return String(value == null ? '' : value)
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  function limparValorImportado(value) {
+    if (value == null) return '';
+    const text = String(value).trim();
+    if (/^#(N\/D|N\/A|REF!|VALOR!|VALUE!|DIV\/0!|NAME\?|NUM!|NULL!)/i.test(text)) return '';
+    return text;
+  }
+
+  function obterCelulaImportada(row, index) {
+    return index >= 0 && row ? limparValorImportado(row[index]) : '';
+  }
+
+  function detectarGruposSemanais(rows) {
+    const groupsByStart = new Map();
+
+    rows.forEach(row => {
+      if (!row) return;
+      for (let start = 0; start + 4 < row.length; start++) {
+        const labels = row.slice(start, start + 5).map(normalizarCabecalhoImportacao);
+        if (labels[0] === 'NOME' && labels[1] === 'CPF' && labels[2] === 'CNPJ' &&
+            labels[3].includes('DATA') && labels[4].includes('VALOR')) {
+          groupsByStart.set(start, {
+            vendedor: start,
+            cpf: start + 1,
+            cnpj: start + 2,
+            data: start + 3,
+            valor: start + 4
+          });
+        }
+      }
+    });
+
+    return Array.from(groupsByStart.values());
+  }
+
+  function extrairRegistrosSemanais(rows, groups) {
+    const records = [];
+    let lastSeenLoja = '';
+
+    rows.forEach(row => {
+      const sectionNumber = obterCelulaImportada(row, 0);
+      if (/^\d+$/.test(sectionNumber)) lastSeenLoja = sectionNumber;
+
+      groups.forEach(columns => {
+        const vendedor = obterCelulaImportada(row, columns.vendedor);
+        const normalizedName = normalizarCabecalhoImportacao(vendedor);
+        if (!vendedor || normalizedName === 'TOTAL' || normalizedName === 'NOME' || normalizedName.startsWith('#')) return;
+
+        const cpf = obterCelulaImportada(row, columns.cpf);
+        const cnpj = obterCelulaImportada(row, columns.cnpj);
+        const data = obterCelulaImportada(row, columns.data);
+        const valor = obterCelulaImportada(row, columns.valor);
+        if (!cpf && !cnpj && !data && !valor) return;
+
+        records.push({
+          vendedor,
+          cpf,
+          cnpj,
+          data,
+          valor,
+          loja: lastSeenLoja
+        });
+      });
+    });
+
+    return records;
+  }
+
+  function encontrarColunaCabecalho(headers, predicate) {
+    return headers.findIndex(header => predicate(normalizarCabecalhoImportacao(header)));
+  }
+
+  function extrairRegistrosTabulares(rows) {
+    let headerIndex = -1;
+    let columns = null;
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const headers = rows[rowIndex] || [];
+      const detected = {
+        vendedor: encontrarColunaCabecalho(headers, key => key.includes('VENDEDOR') || key === 'NOME' || key.includes('FUNCIONARIO')),
+        cpf: encontrarColunaCabecalho(headers, key => key.includes('CPF') && !key.includes('CNPJ')),
+        cnpj: encontrarColunaCabecalho(headers, key => key.includes('CNPJ')),
+        valor: encontrarColunaCabecalho(headers, key => key.includes('VALOR') || key === 'VL' || key.includes('TOTAL')),
+        data: encontrarColunaCabecalho(headers, key => key.includes('DATA') || /^DT\b/.test(key)),
+        loja: encontrarColunaCabecalho(headers, key => key.includes('LOJA') || key.includes('FILIAL'))
+      };
+
+      if (detected.vendedor >= 0 && detected.valor >= 0 && detected.data >= 0) {
+        headerIndex = rowIndex;
+        columns = detected;
+        break;
+      }
+    }
+
+    if (headerIndex < 0) return [];
+
+    let lastSeenLoja = '';
+    const records = [];
+    for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex] || [];
+      const vendedor = obterCelulaImportada(row, columns.vendedor);
+      const normalizedName = normalizarCabecalhoImportacao(vendedor);
+      if (!vendedor || normalizedName === 'TOTAL' || normalizedName === 'NOME' || normalizedName.startsWith('#')) continue;
+
+      let loja = obterCelulaImportada(row, columns.loja);
+      if (loja) lastSeenLoja = loja;
+      else loja = lastSeenLoja;
+
+      records.push({
+        vendedor,
+        cpf: obterCelulaImportada(row, columns.cpf),
+        cnpj: obterCelulaImportada(row, columns.cnpj),
+        valor: obterCelulaImportada(row, columns.valor),
+        data: obterCelulaImportada(row, columns.data),
+        loja
+      });
+    }
+
+    return records;
+  }
+
   function processarArquivoPlanilha(file) {
     if (!file) return;
     showOverlay('Lendo e processando planilha de pagamentos…');
@@ -682,57 +811,48 @@ window.__tool_init_recibos = function() {
       try {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array', cellDates: false });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: true });
+        let selectedSheetName = '';
+        let items = [];
+        const sheetNames = workbook.SheetNames.slice();
+        const activeTab = Number(workbook.Workbook?.WBView?.[0]?.activeTab);
+        if (Number.isInteger(activeTab) && activeTab >= 0 && activeTab < sheetNames.length) {
+          const [activeSheet] = sheetNames.splice(activeTab, 1);
+          sheetNames.unshift(activeSheet);
+        }
 
-        if (!rawJson || rawJson.length === 0) {
-          hideOverlay();
-          showToast('A planilha enviada está vazia.', true);
+        for (const sheetName of sheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          // Hidden columns remain in the worksheet; keep them in the row arrays.
+          const rows = XLSX.utils.sheet_to_json(worksheet, {
+            header: 1,
+            defval: '',
+            raw: false,
+            blankrows: false,
+            skipHidden: false
+          });
+
+          const weeklyGroups = detectarGruposSemanais(rows);
+          const sheetItems = weeklyGroups.length
+            ? extrairRegistrosSemanais(rows, weeklyGroups)
+            : extrairRegistrosTabulares(rows);
+
+          if (sheetItems.length) {
+            selectedSheetName = sheetName;
+            items = sheetItems;
+            break;
+          }
+        }
+
+        hideOverlay();
+        if (!items.length) {
+          showToast('Nenhum registro encontrado na planilha.', true);
           return;
         }
 
-        // Mapeador inteligente de colunas com propagação de loja para células mescladas/em branco
-        let lastSeenLoja = '';
-        const items = rawJson.map(row => {
-          let vendedor = '', cpf = '', valor = 0, dataVal = '', loja = '', cnpj = '';
-
-          for (const key of Object.keys(row)) {
-            const cleanKey = key.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-            if (cleanKey.includes('VENDEDOR') || cleanKey.includes('NOME') || cleanKey.includes('FUNCIONARIO')) {
-              vendedor = row[key];
-            } else if (cleanKey.includes('CPF')) {
-              cpf = row[key];
-            } else if (cleanKey.includes('VALOR') || cleanKey.includes('VL') || cleanKey.includes('TOTAL')) {
-              valor = row[key];
-            } else if (cleanKey.includes('DATA') || cleanKey.includes('DT')) {
-              dataVal = row[key];
-            } else if (cleanKey.includes('LOJA') || cleanKey.includes('FILIAL')) {
-              loja = row[key];
-            } else if (cleanKey.includes('CNPJ')) {
-              cnpj = row[key];
-            }
-          }
-
-          if (loja && String(loja).trim()) {
-            lastSeenLoja = String(loja).trim();
-          } else if (lastSeenLoja) {
-            loja = lastSeenLoja;
-          }
-
-          return {
-            vendedor: vendedor,
-            cpf: cpf,
-            valor: valor,
-            data: dataVal,
-            loja: loja,
-            cnpj: cnpj
-          };
-        }).filter(item => item.vendedor || item.cpf || item.valor);
-
-        hideOverlay();
         carregarRecibos(items, file.name);
+        if (selectedSheetName) {
+          fileMeta.textContent = `${recibosList.length} recibos processados • Aba: ${selectedSheetName}`;
+        }
 
       } catch (err) {
         hideOverlay();
