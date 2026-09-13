@@ -8,6 +8,43 @@ const Router = (function(){
   let currentTool = null;
   let currentCSS = null;
   let currentJS = null;
+  const ASSET_LOAD_TIMEOUT_MS = 12000;
+
+  function carregarAsset(como, url){
+    return new Promise((resolve, reject) => {
+      const asset = document.createElement(como === 'css' ? 'link' : 'script');
+      const timeout = window.setTimeout(() => {
+        limpar();
+        asset.remove();
+        reject(new Error(`Tempo esgotado ao carregar ${url}`));
+      }, ASSET_LOAD_TIMEOUT_MS);
+
+      function limpar(){
+        window.clearTimeout(timeout);
+        asset.onload = null;
+        asset.onerror = null;
+      }
+
+      asset.onload = () => {
+        limpar();
+        resolve(asset);
+      };
+      asset.onerror = () => {
+        limpar();
+        asset.remove();
+        reject(new Error(`Não foi possível carregar ${url}`));
+      };
+
+      if(como === 'css'){
+        asset.rel = 'stylesheet';
+        asset.href = url;
+        document.head.appendChild(asset);
+      } else {
+        asset.src = url;
+        document.body.appendChild(asset);
+      }
+    });
+  }
 
   function getRoute(){
     const hash = location.hash.replace(/^#\/?/, '') || 'home';
@@ -62,14 +99,7 @@ const Router = (function(){
       const html = await response.text();
 
       // 2. Load CSS (wait for it)
-      await new Promise((resolve) => {
-        currentCSS = document.createElement('link');
-        currentCSS.rel = 'stylesheet';
-        currentCSS.href = cssPath;
-        currentCSS.onload = resolve;
-        currentCSS.onerror = resolve; // Continue even if CSS fails
-        document.head.appendChild(currentCSS);
-      });
+      currentCSS = await carregarAsset('css', cssPath);
 
       // Agora sim injetamos o HTML, com o CSS já pronto!
       container.innerHTML = html;
@@ -79,19 +109,13 @@ const Router = (function(){
       container.offsetHeight; // reflow
       container.style.animation = '';
 
-      // 3. Load JS (wait for it)
-      await new Promise((resolve) => {
-        currentJS = document.createElement('script');
-        currentJS.src = jsPath;
-        currentJS.onload = () => {
-          if (window['__tool_init_' + toolId]) {
-            window['__tool_init_' + toolId]();
-          }
-          resolve();
-        };
-        currentJS.onerror = resolve;
-        document.body.appendChild(currentJS);
-      });
+      // 3. Load JS and initialize the tool
+      currentJS = await carregarAsset('js', jsPath);
+      const inicializar = window['__tool_init_' + toolId];
+      if(typeof inicializar !== 'function'){
+        throw new Error(`A ferramenta "${toolId}" não foi inicializada`);
+      }
+      inicializar();
 
       updateNavActive(toolId);
     } catch (err) {
@@ -101,8 +125,8 @@ const Router = (function(){
           <div class="es-icon" style="background:var(--red-bg);color:var(--red);">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 9v4m0 4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </div>
-          <h4>Ferramenta não encontrada</h4>
-          <p>A ferramenta "${toolId}" não existe ou ocorreu um erro no carregamento.</p>
+          <h4>Não foi possível abrir a ferramenta</h4>
+          <p>${err.message || `A ferramenta "${toolId}" não existe ou ocorreu um erro no carregamento.`}</p>
           <br>
           <a href="#/home" class="btn btn-primary" style="display:inline-flex;">Voltar para o início</a>
         </div>
