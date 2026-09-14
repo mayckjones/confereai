@@ -52,7 +52,7 @@ window.__tool_init_home = function(){
         card.setAttribute('data-tool-id', tool.id);
 
         const bgColor = tool.color + '14'; // 8% opacity
-        const badgeHtml = tool.badge
+        const badgeHtml = tool.id !== 'recibos' && tool.badge
           ? `<span class="tool-card-badge ${tool.badge.toLowerCase() === 'beta' ? 'beta' : ''}">${tool.badge}</span>`
           : '';
 
