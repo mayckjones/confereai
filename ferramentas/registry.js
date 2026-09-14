@@ -30,7 +30,7 @@ const TOOLS_REGISTRY = [
       <polyline points="10 9 9 9 8 9"/>
     </svg>`,
     category: 'Financeiro',
-    badge: 'Novo',
+    badge: null,
     color: '#0284c7'
   }
   // ───────────────────────────────────────────────
