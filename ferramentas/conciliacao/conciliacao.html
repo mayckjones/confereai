@@ -12,8 +12,8 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <h3>Arraste os arquivos aqui</h3>
-    <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas, os Lançamentos e todos os extratos Cielo disponíveis.</p>
-    <p class="dz-extra">Os relatórios gerais do ERP podem conter várias lojas. Cada Cielo é identificado pelo CNPJ e estabelecimento dentro do PDF.</p>
+    <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + Cielo (ou extrato PIX).</p>
+    <p class="dz-extra">Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Identificamos cada relatório automaticamente.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -21,7 +21,7 @@
     <div class="file-slot caixa empty" id="slot-caixa">
       <div class="fs-icon">PDF</div>
       <div class="fs-body">
-        <div class="fs-label">Relação de Vendas <span class="optional-label">1 PDF geral</span></div>
+        <div class="fs-label">Relação de Vendas · Caixa</div>
         <div class="fs-name">Nenhum arquivo</div>
         <div class="fs-status">Aguardando envio</div>
       </div>
@@ -39,31 +39,23 @@
     <div class="file-slot cielo empty" id="slot-cielo">
       <div class="fs-icon">XLSX</div>
       <div class="fs-body">
-        <div class="fs-label">Extratos Cielo <span class="optional-label">Múltiplos PDFs</span></div>
+        <div class="fs-label">Relatório Cielo</div>
         <div class="fs-name">Nenhum arquivo</div>
         <div class="fs-status">Aguardando envio</div>
-        <ul class="selected-file-list" id="cieloFileList"></ul>
       </div>
       <button class="fs-remove" data-slot="cielo" title="Remover" style="display:none;">✕</button>
     </div>
   </div>
 
   <div class="detail-upload">
-    <div class="detail-upload-copy"><span class="detail-eyebrow">RELATÓRIO GERAL DO ERP</span><h3>Lançamentos de Cartão</h3><p>Fonte auxiliar para bandeira, débito/crédito, parcelas, NSU, taxas, POS e auditoria. O total deste arquivo não substitui a Relação de Vendas.</p></div>
+    <div class="detail-upload-copy"><span class="detail-eyebrow">CONFERÊNCIA ADICIONAL</span><h3>Um relatório a mais. Uma visão mais completa.</h3><p>Confira como a farmácia registrou a bandeira, o débito ou crédito e as parcelas de cada venda.</p></div>
     <div class="file-slot lancamentos empty" id="slot-lancamentos">
       <div class="fs-icon">PDF</div>
-      <div class="fs-body"><div class="fs-label">Lançamentos de Cartão Magnético <span class="optional-label">1 PDF geral</span></div><div class="fs-name">Nenhum arquivo</div><div class="fs-status">Aguardando envio</div></div>
+      <div class="fs-body"><div class="fs-label">Lançamentos de Cartão Magnético <span class="optional-label">Opcional</span></div><div class="fs-name">Nenhum arquivo</div><div class="fs-status">Adicione para detalhar a conciliação Cielo</div></div>
       <button class="fs-remove" data-slot="lancamentos" title="Remover lançamentos" style="display:none;">✕</button>
       <button class="btn btn-ghost" id="btnAddDetails">Adicionar</button>
     </div>
   </div>
-
-  <details class="mapping-panel" id="mappingPanel">
-    <summary><span><strong>Mapeamento de empresas</strong><small>Loja ERP × CNPJ × estabelecimento Cielo</small></span><span>Editar</span></summary>
-    <div class="mapping-help">Os vínculos ficam salvos neste navegador. Separe múltiplos estabelecimentos por vírgula. O nome do arquivo Cielo não é usado.</div>
-    <div class="table-scroll"><table class="mapping-table"><thead><tr><th>Loja ERP</th><th>Razão social</th><th>CNPJ</th><th>Conta</th><th>Estabelecimento Cielo</th><th>Extrato acessível</th><th>Observações</th></tr></thead><tbody id="mappingBody"></tbody></table></div>
-    <div class="mapping-actions"><button class="btn btn-ghost" id="btnAddMapping" type="button">Adicionar loja</button><button class="btn btn-primary" id="btnSaveMappings" type="button">Salvar mapeamento</button></div>
-  </details>
 
   <div class="actions-row">
     <button class="btn btn-primary" id="btnProcess" disabled>
@@ -91,12 +83,6 @@
       <button id="tab-source" role="tab" aria-selected="false" aria-controls="view-source" data-view="source" tabindex="-1">Vendas lidas</button>
     </div>
     <div id="view-overview" role="tabpanel" aria-labelledby="tab-overview">
-
-    <div class="section-head store-summary-head"><h2>Resultado por loja</h2><label class="store-filter">Exibir <select id="storeFilter"><option value="all">Todas as lojas</option></select></label></div>
-    <div class="panel"><div class="table-scroll"><table><thead><tr><th>Loja</th><th class="num">ERP</th><th class="num">Cielo</th><th class="num">Conciliado</th><th class="num">Divergências</th><th class="num">Não conciliado</th><th>Situação</th></tr></thead><tbody id="storeSummaryBody"></tbody></table></div></div>
-
-    <div class="section-head"><h2>Auditoria das transações</h2><span class="sub">Relação de Vendas como fonte financeira</span></div>
-    <div class="panel"><div class="panel-head"><h3>Conciliação consolidada</h3><span class="count" id="consolidatedCount">0 itens</span></div><div class="table-scroll consolidated-scroll"><table><thead><tr><th>Loja / registro</th><th>Data e hora</th><th class="num">ERP</th><th class="num">Cielo bruto</th><th>ERP → Cielo</th><th>Status / confiança</th></tr></thead><tbody id="consolidatedBody"></tbody></table></div></div>
 
     <div class="section-head">
       <h2>2. Visão geral</h2>

@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("function mappingRowHtml")) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, reconcile, associateCieloStores, validatePeriods, buildConsolidatedAudit, summarizeStores, DEFAULT_COMPANY_MAPPINGS }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -88,87 +88,4 @@ test('PIX continua conciliando recebimentos no próximo dia útil', () => {
 test('PDF parcialmente reconhecido é bloqueado quando o total impresso difere', () => {
   assert.throws(() => engine.parseCaixaLines(['7-LOJA 7', '1406 Bal 1305 09/09/2026 07:02 1/ 1 53 0,0% Cartao Mag 38,48', 'Total Geral .....: 48,48']), /total impresso/);
   assert.throws(() => engine.parseCieloPdfLines(['2 R$ 48,48 -R$ 0,43 R$ 48,05', '09/09/2026 07:01 Débito Elo R$ 38,48 -R$ 0,33 R$ 38,15 Aprovada']), /totalizador/);
-});
-
-test('Relação geral separa lojas, extrai registro e documento e preserva linha secundária', () => {
-  const rows = engine.parseCaixaLines([
-    '1-LOJA 1 JIE',
-    '122 Bal 9001 17/09/2026 10:00 3/ 1 106 0,0% Cartao Mag 20,00',
-    'Cartao Mag 10,00',
-    '2-LOJA 2 MEG',
-    '536 Bal 9002 17/09/2026 10:03 2/ 1 103 0,0% Cartao Mag 5,00',
-    'Total Geral .....: 35,00'
-  ]);
-  assert.deepEqual(Array.from(rows, row => row.loja), ['1', '1', '2']);
-  assert.equal(rows[0].registro, '122'); assert.equal(rows[0].documento, '9001');
-  assert.equal(rows[1].linhaSecundaria, true); assert.equal(rows[1].valorCentavos, 1000);
-});
-
-test('Cielo é associada pelo CNPJ/estabelecimento do conteúdo', () => {
-  const parsed = engine.parseCieloPdfLines(['17/09/2026 10:00 1040788502 15.045.542/0001-58 Crédito à vista Visa R$ 10,00 -R$ 0,14 R$ 9,86 Aprovada'], 'arquivo_com_nome_errado.pdf');
-  const mapped = engine.associateCieloStores(parsed, engine.DEFAULT_COMPANY_MAPPINGS);
-  assert.equal(mapped[0].loja, '3'); assert.equal(mapped[0].arquivoOrigem, 'arquivo_com_nome_errado.pdf');
-});
-
-test('matching multiloja aceita até cinco minutos e registra evidências', () => {
-  const rel = [{ ...sale(10, '10:00', '1'), loja: '1' }];
-  const launch = engine.parseCardLaunchLines(['1-LOJA 1', '17/09/2026', '1 - MASTERCARD 1 1 10,00 1,00 9,90 123']);
-  rel[0].data = '2026-09-17';
-  const cielo = engine.parseCieloPdfLines(['17/09/2026 10:05 1029024402 11.719.336/0001-25 Crédito à vista Mastercard R$ 10,00 -R$ 0,10 R$ 9,90 Aprovada']);
-  const row = engine.buildConsolidatedAudit(rel, launch, cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0];
-  assert.equal(row.statusConciliacao, 'CONCILIADO'); assert.equal(row.confidence, 'HIGH'); assert.match(row.matchReasons.join(' '), /5 minuto/);
-});
-
-test('mesmo valor com dois candidatos compatíveis fica ambíguo', () => {
-  const rel = [{ ...sale(10, '10:00', '1'), loja: '1', data: '2026-09-17' }];
-  const cielo = engine.parseCieloPdfLines([
-    '17/09/2026 09:59 1029024402 11.719.336/0001-25 Crédito à vista Visa R$ 10,00 -R$ 0,10 R$ 9,90 Aprovada',
-    '17/09/2026 10:01 1029024402 11.719.336/0001-25 Crédito à vista Visa R$ 10,00 -R$ 0,10 R$ 9,90 Aprovada'
-  ]);
-  const row = engine.buildConsolidatedAudit(rel, [], cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0];
-  assert.equal(row.statusConciliacao, 'AMBÍGUO'); assert.equal(row.bank, null);
-});
-
-test('loja sem acesso à Cielo não vira divergência financeira comum', () => {
-  const rel = [{ ...sale(10, '10:00', '536'), loja: '2', data: '2026-09-17' }];
-  const row = engine.buildConsolidatedAudit(rel, [], [], engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0];
-  assert.equal(row.statusConciliacao, 'LOJA SEM EXTRATO CIELO');
-});
-
-test('CARTAO POS não é cobrado da Cielo', () => {
-  const rel = [{ ...sale(20, '10:00', '122'), loja: '1', data: '2026-09-17' }];
-  const launch = engine.parseCardLaunchLines(['1-LOJA 1', '17/09/2026', '8 - CARTAO POS 122 1 20,00 1,00 19,80 00000']);
-  const row = engine.buildConsolidatedAudit(rel, launch, [], engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0];
-  assert.equal(row.statusConciliacao, 'OUTRA ADQUIRENTE / POS');
-});
-
-test('duplicidade considera parcelas, Registro e NSU, sem apagar valores iguais', () => {
-  const lines = engine.parseCardLaunchLines(['1-LOJA 1', '17/09/2026',
-    '1 - MASTERCARD 122 2 10,00 1,00 9,90 777', '1 - MASTERCARD 122 2 10,00 1,00 9,90 777', '1 - MASTERCARD 122 2 10,00 1,00 9,90 777']);
-  const group = engine.aggregateCardLaunches(lines)[0];
-  assert.equal(group.linhas.length, 3); assert.equal(group.possibleDuplicate, true);
-});
-
-test('divergências de bandeira, tipo e parcelas são exibidas sem corrigir silenciosamente', () => {
-  const baseRel = [{ ...sale(10, '10:00', '122'), loja: '1', data: '2026-09-17' }];
-  const cieloLine = '17/09/2026 10:00 1029024402 11.719.336/0001-25 Débito à vista Visa R$ 10,00 -R$ 0,10 R$ 9,90 Aprovada';
-  const cielo = engine.parseCieloPdfLines([cieloLine]);
-  const brand = engine.parseCardLaunchLines(['1-LOJA 1','17/09/2026','1 - MASTERCARD 122 1 10,00 1,00 9,90 1']);
-  const type = engine.parseCardLaunchLines(['1-LOJA 1','17/09/2026','2 - VISA 122 1 10,00 1,00 9,90 1']);
-  const parts = engine.parseCardLaunchLines(['1-LOJA 1','17/09/2026','6 - VISA DEBITO 122 2 5,00 1,00 4,95 1','6 - VISA DEBITO 122 2 5,00 1,00 4,95 1']);
-  assert.equal(engine.buildConsolidatedAudit(baseRel, brand, cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0].statusConciliacao, 'CONCILIADO COM DIVERGÊNCIA DE BANDEIRA');
-  assert.equal(engine.buildConsolidatedAudit(baseRel, type, cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0].statusConciliacao, 'CONCILIADO COM DIVERGÊNCIA DE TIPO');
-  assert.equal(engine.buildConsolidatedAudit(baseRel, parts, cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows[0].statusConciliacao, 'CONCILIADO COM DIVERGÊNCIA DE PARCELAS');
-});
-
-test('ERP sem Cielo e Cielo sem ERP recebem status distintos', () => {
-  const rel = [{ ...sale(10, '10:00', '122'), loja: '1', data: '2026-09-17' }];
-  const cielo = engine.parseCieloPdfLines(['17/09/2026 11:00 1029024402 11.719.336/0001-25 Crédito à vista Visa R$ 20,00 -R$ 0,20 R$ 19,80 Aprovada']);
-  const rows = engine.buildConsolidatedAudit(rel, [], cielo, engine.DEFAULT_COMPANY_MAPPINGS, 5).rows;
-  assert.ok(rows.some(row => row.statusConciliacao === 'NÃO ENCONTRADO NA CIELO'));
-  assert.ok(rows.some(row => row.statusConciliacao === 'SOMENTE CIELO'));
-});
-
-test('períodos incompatíveis bloqueiam a conciliação', () => {
-  assert.throws(() => engine.validatePeriods([{ data: '2026-09-17' }], [{ data: '2026-09-17' }], [{ data: '2026-09-18' }]), /PERÍODOS INCOMPATÍVEIS/);
 });
