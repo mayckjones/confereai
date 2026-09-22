@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -63,6 +63,16 @@ test('classificação divergente é detectada mesmo quando os valores fecham', (
   assert.equal(result.divergences.length, 0);
   const row = engine.buildCardAudit([a], lines, [b], result.pairs).rows[0];
   assert.equal(row.brand, true); assert.equal(row.mode, true); assert.equal(row.installments, true);
+});
+test('valores e totais por categoria vêm da Relação, mesmo se o lançamento tiver outro valor', () => {
+  const lines = engine.parseCardLaunchLines(launchFixture).map(line => ({ ...line, valor: line.valor - 1 }));
+  const a = sale(184.95, '08:49'), b = bank(184.95, '08:49');
+  const result = engine.reconcile([a], [], [b]);
+  const audit = engine.buildCardAudit([a], lines, [b], result.pairs);
+  const groups = engine.buildCardGroups(audit, [b]);
+  assert.equal(result.divergences.length, 0);
+  assert.equal(audit.rows[0].issues.length, 0);
+  assert.equal(groups.find(group => group.qtdSistema === 1).sistema, 18495);
 });
 test('cobertura incompleta não vira classificação conferida', () => {
   const a = sale(184.95, '08:49'), b = bank(184.95, '08:49');

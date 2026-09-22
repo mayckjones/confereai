@@ -595,7 +595,6 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
     internal.forEach(function(g){ used.add(g); });
     if(internal.length === 0) issues.push('Sem lançamento interno');
     if(internal.length > 1) issues.push('Mais de um lançamento para o registro');
-    if(launch && cents(launch.valor) !== cents(sale.valor)) issues.push('Valor interno divergente');
     if(launch && (launch.linhas.length !== launch.parcelas || launch.linhas.some(function(l){ return l.parcelas !== launch.parcelas; }))) issues.push('Parcelas internas incompletas ou repetidas');
     if(!pair) issues.push('Sem correspondência segura na Cielo');
     if(pair && pair.confidence !== 'horario') issues.push('Conferir vínculo: apenas data e valor');
@@ -610,7 +609,7 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
       if(!launch.parcelas || !pair.banco.parcelas) issues.push('Parcelas não identificadas');
       else if(launch.parcelas !== pair.banco.parcelas){ installments = true; issues.push('Parcelas divergentes'); }
     }
-    rows.push({ sale: sale, launch: launch, bank: pair ? pair.banco : null, issues: issues, brand: brand, mode: mode, installments: installments, internalOK: internal.length === 1 && launch && cents(launch.valor) === cents(sale.valor), confidence: pair ? pair.confidence : null });
+    rows.push({ sale: sale, launch: launch, bank: pair ? pair.banco : null, issues: issues, brand: brand, mode: mode, installments: installments, internalOK: internal.length === 1 && launch && launch.linhas.length === launch.parcelas, confidence: pair ? pair.confidence : null });
   });
   groups.filter(function(g){ return !used.has(g); }).forEach(function(g){ rows.push({ sale: null, launch: g, bank: null, issues: ['Lançamento sem venda na Relação'], internalOK: false }); });
   pairs.sobras.forEach(function(b){ rows.push({ sale: null, launch: null, bank: b, issues: ['Venda Cielo sem correspondência segura'], internalOK: false }); });
@@ -953,16 +952,20 @@ document.querySelectorAll('[data-view]').forEach(function(button){
   });
 });
 
-function cardGroups(){
+function buildCardGroups(audit, cielo){
   var groups = new Map();
-  function add(list, side){ list.forEach(function(tx){
+  function add(list, side){ list.forEach(function(item){
+    var tx = item.classification || {};
     var key = (tx.bandeira || 'Não identificada') + ' · ' + (MODAL_LABEL[tx.modalidade] || 'Não identificado');
     if(!groups.has(key)) groups.set(key, { categoria: key, sistema: 0, cielo: 0, qtdSistema: 0, qtdCielo: 0 });
-    var g = groups.get(key); g[side] += cents(tx.valor); g[side === 'sistema' ? 'qtdSistema' : 'qtdCielo']++;
+    var g = groups.get(key); g[side] += cents(item.valor); g[side === 'sistema' ? 'qtdSistema' : 'qtdCielo']++;
   }); }
-  add(state.cardAudit.groups, 'sistema'); add(state.parsed.cielo, 'cielo');
+  add(audit.rows.filter(function(r){ return r.sale; }).map(function(r){ return { valor: r.sale.valor, classification: r.launch }; }), 'sistema');
+  add(cielo.map(function(tx){ return { valor: tx.valor, classification: tx }; }), 'cielo');
   return Array.from(groups.values()).sort(function(a,b){ return a.categoria.localeCompare(b.categoria); });
 }
+
+function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.cielo); }
 
 function renderCardAudit(){
   var audit = state.cardAudit, rows = audit.rows;
@@ -978,11 +981,11 @@ function renderCardAudit(){
   var integrityOK = audit.internalCount === state.parsed.caixa.length && audit.groups.length === state.parsed.caixa.length && !rows.some(function(r){ return r.issues.some(function(i){ return /internas|interno|registro|Relação/.test(i); }); });
   var banner = document.getElementById('cardIntegrity');
   banner.className = 'integrity-banner ' + (integrityOK ? 'good' : 'warn');
-  banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos consistentes' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas consolidadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros fecham em valor com a Relação. Total dos lançamentos: ' + fmtBRL(sumValues(audit.groups)) + '.</p></div>';
+  banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos vinculados' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas classificadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros vinculados à Relação. Total da Relação: ' + fmtBRL(sumValues(state.parsed.caixa)) + '.</p></div>';
   document.getElementById('cardGroupBody').innerHTML = cardGroups().map(function(g){ return '<tr><td>' + escapeHtml(g.categoria) + '</td><td class="num">' + g.qtdSistema + '</td><td class="num">' + fmtBRL(g.sistema / 100) + '</td><td class="num">' + g.qtdCielo + '</td><td class="num">' + fmtBRL(g.cielo / 100) + '</td><td class="num ' + (g.sistema === g.cielo ? 'diff-zero' : 'diff-neg') + '">' + fmtBRL((g.sistema - g.cielo) / 100) + '</td></tr>'; }).join('');
-  var netSystem = sumValues(audit.groups, 'valorLiquido'), netBank = sumValues(state.parsed.cielo, 'valorLiquido');
+  var grossSystem = sumValues(state.parsed.caixa), grossBank = sumValues(state.parsed.cielo), netBank = sumValues(state.parsed.cielo, 'valorLiquido');
   var bankHasNet = state.parsed.cielo.every(function(t){ return Number.isFinite(t.valorLiquido); });
-  document.getElementById('cardNetSummary').innerHTML = '<div><span>Líquido previsto · sistema</span><strong>' + fmtBRL(netSystem) + '</strong></div><div><span>Líquido · Cielo</span><strong>' + (bankHasNet ? fmtBRL(netBank) : 'Não disponível') + '</strong></div><div><span>Diferença · Cielo − sistema</span><strong>' + (bankHasNet ? fmtBRL((cents(netBank) - cents(netSystem)) / 100) : '—') + '</strong></div><div><span>Taxas · Cielo</span><strong>' + (bankHasNet ? fmtBRL((cents(sumValues(state.parsed.cielo)) - cents(netBank)) / 100) : '—') + '</strong></div>';
+  document.getElementById('cardNetSummary').innerHTML = '<div><span>Bruto · Relação</span><strong>' + fmtBRL(grossSystem) + '</strong></div><div><span>Bruto · Cielo</span><strong>' + fmtBRL(grossBank) + '</strong></div><div><span>Diferença bruta</span><strong>' + fmtBRL((cents(grossSystem) - cents(grossBank)) / 100) + '</strong></div><div><span>Taxas · Cielo</span><strong>' + (bankHasNet ? fmtBRL((cents(grossBank) - cents(netBank)) / 100) : '—') + '</strong></div>';
   renderCardRows();
 }
 
@@ -1013,11 +1016,11 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank; return {
     'Data': tx.data ? formatDateBR(tx.data) : '', 'Registro': (r.sale || r.launch || {}).registro || '',
     'Hora sistema': r.sale && r.sale.hora || '', 'Hora Cielo': r.bank && r.bank.hora || '', 'NSU interno': r.launch && r.launch.nsu || '',
-    'Valor Relação': r.sale ? r.sale.valor : '', 'Valor Lançamentos': r.launch ? r.launch.valor : '', 'Valor Cielo': r.bank ? r.bank.valor : '',
+    'Valor Relação': r.sale ? r.sale.valor : '', 'Valor Cielo': r.bank ? r.bank.valor : '',
     'Bandeira sistema': r.launch && r.launch.bandeira || '', 'Bandeira Cielo': r.bank && r.bank.bandeira || '',
     'Modalidade sistema': r.launch ? MODAL_LABEL[r.launch.modalidade] : '', 'Modalidade Cielo': r.bank ? MODAL_LABEL[r.bank.modalidade] : '',
     'Parcelas sistema': r.launch && r.launch.parcelas || '', 'Parcelas Cielo': r.bank && r.bank.parcelas || '',
-    'Líquido previsto sistema': r.launch ? r.launch.valorLiquido : '', 'Líquido Cielo': r.bank ? r.bank.valorLiquido : '',
+    'Líquido Cielo': r.bank ? r.bank.valorLiquido : '',
     'Conferência': r.issues.join('; ') || 'Conferido', 'Vínculo': r.confidence === 'horario' ? 'Data e horário próximo' : 'Revisar',
     'Origem Relação': r.sale && r.sale.raw || '', 'Origem Lançamentos': r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : '', 'Origem Cielo': r.bank && r.bank.raw || ''
   }; });
