@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -78,6 +78,37 @@ test('cobertura incompleta não vira classificação conferida', () => {
   const a = sale(184.95, '08:49'), b = bank(184.95, '08:49');
   const row = engine.buildCardAudit([a], [], [b], engine.matchCardTransactions([a], [b])).rows[0];
   assert.ok(row.issues.includes('Sem lançamento interno')); assert.equal(row.internalOK, false);
+});
+test('venda sem Lançamento permanece na conciliação de valores e nos totais do sistema', () => {
+  const covered = sale(184.95, '08:49');
+  const uncovered = sale(10, '09:00', '9999');
+  const cielo = [bank(184.95, '08:49'), bank(10, '09:00')];
+  const result = engine.reconcile([covered, uncovered], [], cielo);
+  const audit = engine.buildCardAudit([covered, uncovered], engine.parseCardLaunchLines(launchFixture), cielo, result.pairs);
+  const categories = engine.buildCardGroups(audit, cielo);
+  assert.equal(result.divergences.length, 0);
+  assert.equal(result.summary[0].caixa, 194.95);
+  assert.equal(audit.rows.length, 2);
+  assert.ok(audit.rows.find(row => row.sale === uncovered).issues.includes('Sem lançamento interno'));
+  assert.equal(categories.reduce((sum, group) => sum + group.sistema, 0), 19495);
+  assert.equal(categories.find(group => group.categoria.startsWith('Não identificada')).sistema, 1000);
+});
+test('quatro extratos Cielo geram quatro lojas isoladas e excluem a loja 2', () => {
+  const stores = ['1', '2', '3', '6', '7'];
+  const establishments = { '1': '1029024402', '3': '1040788502', '6': '2800327299', '7': '3002105343' };
+  const sales = stores.map((store, index) => ({ ...sale(10 + index, '10:00', String(index + 1)), loja: store }));
+  const cielo = stores.filter(store => store !== '2').map(store => {
+    const matchingSale = sales.find(item => item.loja === store);
+    return { ...bank(matchingSale.valor, '10:00'), estabelecimento: establishments[store] };
+  });
+  const launches = [{ ...engine.parseCardLaunchLines(launchFixture)[0], loja: '1', registro: '1', parcelas: 1 }];
+  const runs = engine.buildStoreRuns(sales, cielo, launches);
+  assert.deepEqual(Array.from(runs, run => run.label), ['Loja 1', 'Loja 3', 'Loja 4', 'Loja 5']);
+  assert.equal(runs.reduce((sum, run) => sum + run.parsed.caixa.length, 0), 4);
+  assert.ok(runs.every(run => run.divergences.length === 0));
+  assert.ok(runs.every(run => run.cardAudit));
+  assert.ok(runs.find(run => run.store === '3').cardAudit.rows[0].issues.includes('Sem lançamento interno'));
+  assert.throws(() => engine.buildStoreRuns(sales, cielo.slice(1), launches), /Falta o relatório Cielo/);
 });
 test('registro duplicado ou parcela faltante fica pendente', () => {
   const lines = engine.parseCardLaunchLines(launchFixture), a = sale(184.95, '08:49'), b = bank(184.95, '08:49');

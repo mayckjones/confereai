@@ -20,7 +20,17 @@ var state = {
   divergences: [],
   summary: [],
   alignedRows: [],
+  storeRuns: [],
+  activeStoreIndex: 0,
   processedOnce: false
+};
+
+// Números de loja do sistema e estabelecimentos Cielo confirmados pelos relatórios.
+var STORE_CONFIG = {
+  '1': { label: 'Loja 1', establishment: '1029024402' },
+  '3': { label: 'Loja 3', establishment: '1040788502' },
+  '7': { label: 'Loja 4', establishment: '3002105343' },
+  '6': { label: 'Loja 5', establishment: '2800327299' }
 };
 
 var MODAL_LABEL = { PIX: 'PIX', Debito: 'Débito', Credito: 'Crédito', Dinheiro: 'Dinheiro', Cartao: 'Cartão (não especificado)', Outro: 'Não identificado' };
@@ -617,6 +627,42 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
   return { rows: rows, groups: groups, lineCount: launchLines.length, internalCount: rows.filter(function(r){ return r.internalOK; }).length };
 }
 
+function buildStoreRuns(caixaTx, cieloTx, launchTx){
+  var storeIds = Array.from(new Set(caixaTx.map(function(tx){ return tx.loja; }))).filter(function(id){ return id !== '2'; });
+  if(!storeIds.length) throw new Error('A Relação enviada contém apenas a loja 2, que não participa desta conciliação Cielo.');
+  launchTx.forEach(function(tx){
+    if(tx.loja !== '2' && !storeIds.includes(tx.loja)) throw new Error('Há Lançamentos da loja ' + tx.loja + ' sem vendas correspondentes na Relação.');
+  });
+  var byEstablishment = new Map();
+  cieloTx.forEach(function(tx){
+    if(!tx.estabelecimento) throw new Error('Para conciliar várias lojas, cada venda da Cielo precisa informar o estabelecimento. Use os PDFs detalhados por loja.');
+    if(!byEstablishment.has(tx.estabelecimento)) byEstablishment.set(tx.estabelecimento, []);
+    byEstablishment.get(tx.estabelecimento).push(tx);
+  });
+  var storeOrder = ['1', '3', '7', '6'];
+  byEstablishment.forEach(function(_, establishment){
+    var id = storeOrder.find(function(key){ return STORE_CONFIG[key].establishment === establishment; });
+    if(!id) throw new Error('Estabelecimento Cielo ' + establishment + ' não está vinculado a uma loja do sistema. Confira os arquivos.');
+    if(!storeIds.includes(id)) throw new Error('O relatório Cielo da ' + STORE_CONFIG[id].label + ' não tem vendas na Relação enviada.');
+  });
+  var dates = new Set(caixaTx.concat(cieloTx, launchTx).map(function(tx){ return tx.data; }));
+  if(dates.size !== 1) throw new Error('Os relatórios de várias lojas precisam ser da mesma data. Confira os períodos enviados.');
+  return storeIds.sort(function(a,b){ return storeOrder.indexOf(a) - storeOrder.indexOf(b); }).map(function(id){
+    var config = STORE_CONFIG[id];
+    if(!config) throw new Error('A loja ' + id + ' da Relação ainda não tem um estabelecimento Cielo configurado.');
+    var bank = byEstablishment.get(config.establishment);
+    if(!bank || !bank.length) throw new Error('Falta o relatório Cielo da ' + config.label + ' (estabelecimento ' + config.establishment + ').');
+    var sales = caixaTx.filter(function(tx){ return tx.loja === id; });
+    var launches = launchTx.filter(function(tx){ return tx.loja === id; });
+    var result = reconcile(sales, [], bank);
+    return {
+      store: id, label: config.label, parsed: { caixa: sales, sicredi: [], cielo: bank, lancamentos: launches },
+      divergences: result.divergences, summary: result.summary, pairs: result.pairs,
+      cardAudit: launchTx.length ? buildCardAudit(sales, launches, bank, result.pairs) : null
+    };
+  });
+}
+
 /* =========================================================================
    UI — DROPZONE / SLOTS
    ========================================================================= */
@@ -627,7 +673,10 @@ document.getElementById('btnAddDetails').addEventListener('click', function(){ f
 function invalidateResults(){
   state.processedOnce = false;
   state.cardAudit = null;
+  state.storeRuns = [];
+  state.activeStoreIndex = 0;
   document.getElementById('resultsWrap').classList.remove('show');
+  document.getElementById('storeTabs').hidden = true;
   document.getElementById('btnExport').disabled = true;
 }
 
@@ -790,20 +839,28 @@ document.getElementById('btnProcess').addEventListener('click', async function()
       if(!cieloTx.length) throw new Error('A conferência de cartões precisa do relatório Cielo.');
       showOverlay('Consolidando parcelas e conferindo os lançamentos…');
       for(var li = 0; li < state.files.lancamentos.length; li++) launchTx = launchTx.concat(parseCardLaunchLines(await extractPdfLines(state.files.lancamentos[li])));
-      if(new Set(caixaTx.map(function(t){ return t.loja; })).size > 1 || new Set(cieloTx.map(function(t){ return t.cnpj || t.estabelecimento || ''; })).size > 1) throw new Error('Para conferir os cartões, envie os relatórios de uma única loja por vez.');
     }
 
     showOverlay('Cruzando transações…');
-    state.parsed = { caixa: caixaTx, sicredi: sicrediTx, cielo: cieloTx, lancamentos: launchTx };
-    var result = reconcile(caixaTx, sicrediTx, cieloTx);
-    state.divergences = result.divergences;
-    state.summary = result.summary;
-    state.pairs = result.pairs;
-    state.cardAudit = launchTx.length ? buildCardAudit(caixaTx, launchTx, cieloTx, result.pairs) : null;
+    var storeCount = new Set(caixaTx.map(function(tx){ return tx.loja; })).size;
+    if(cieloTx.length && storeCount > 1){
+      state.storeRuns = buildStoreRuns(caixaTx, cieloTx, launchTx);
+      state.activeStoreIndex = 0;
+      applyStoreRun(state.storeRuns[0]);
+    } else {
+      if(launchTx.length && new Set(cieloTx.map(function(t){ return t.cnpj || t.estabelecimento || ''; })).size > 1) throw new Error('Para conferir uma única loja, envie apenas o relatório Cielo dessa loja.');
+      state.parsed = { caixa: caixaTx, sicredi: sicrediTx, cielo: cieloTx, lancamentos: launchTx };
+      var result = reconcile(caixaTx, sicrediTx, cieloTx);
+      state.divergences = result.divergences;
+      state.summary = result.summary;
+      state.pairs = result.pairs;
+      state.cardAudit = launchTx.length ? buildCardAudit(caixaTx, launchTx, cieloTx, result.pairs) : null;
+    }
     state.cardFilter = 'pending';
     document.getElementById('cardSearch').value = '';
     state.processedOnce = true;
 
+    renderStoreTabs();
     renderResults();
     showToast('Conciliação processada com sucesso.');
   } catch(err){
@@ -817,13 +874,52 @@ document.getElementById('btnProcess').addEventListener('click', async function()
 /* =========================================================================
    RENDER
    ========================================================================= */
+function applyStoreRun(run){
+  state.parsed = run.parsed;
+  state.divergences = run.divergences;
+  state.summary = run.summary;
+  state.pairs = run.pairs;
+  state.cardAudit = run.cardAudit;
+}
+
+function renderStoreTabs(){
+  var tabs = document.getElementById('storeTabs');
+  tabs.hidden = state.storeRuns.length === 0;
+  tabs.innerHTML = state.storeRuns.map(function(run, index){
+    return '<button type="button" role="tab" data-store-index="' + index + '" aria-selected="' + (index === state.activeStoreIndex) + '" tabindex="' + (index === state.activeStoreIndex ? '0' : '-1') + '" class="' + (index === state.activeStoreIndex ? 'active' : '') + '">' + escapeHtml(run.label) + '</button>';
+  }).join('');
+}
+
+document.getElementById('storeTabs').addEventListener('click', function(event){
+  var button = event.target.closest('[data-store-index]');
+  if(!button) return;
+  var index = Number(button.dataset.storeIndex);
+  if(!state.storeRuns[index] || index === state.activeStoreIndex) return;
+  state.activeStoreIndex = index;
+  applyStoreRun(state.storeRuns[index]);
+  state.cardFilter = 'pending';
+  document.getElementById('cardSearch').value = '';
+  renderStoreTabs();
+  renderResults();
+  document.querySelector('#storeTabs [data-store-index="' + index + '"]').focus();
+});
+
+document.getElementById('storeTabs').addEventListener('keydown', function(event){
+  if(!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  var count = state.storeRuns.length;
+  var next = event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : (state.activeStoreIndex + (event.key === 'ArrowRight' ? 1 : -1) + count) % count;
+  var button = document.querySelector('#storeTabs [data-store-index="' + next + '"]');
+  if(button) button.click();
+});
+
 function renderResults(){
   document.getElementById('resultsWrap').classList.add('show');
 
   var caixa = state.parsed.caixa, sicredi = state.parsed.sicredi, cielo = state.parsed.cielo;
   document.getElementById('mSicredi').closest('.metric-card').hidden = cielo.length > 0;
   document.getElementById('mCielo').closest('.metric-card').hidden = !cielo.length;
-  document.getElementById('analysisMode').textContent = state.cardAudit ? 'Conferência detalhada · 3 relatórios' : 'Conciliação de valores';
+  document.getElementById('analysisMode').textContent = state.storeRuns.length ? 'Conferência por loja · ' + state.storeRuns[state.activeStoreIndex].label : state.cardAudit ? 'Conferência detalhada · 3 relatórios' : 'Conciliação de valores';
   document.getElementById('analysisScope').textContent = state.cardAudit ? 'Valores + dados dos cartões' : 'Bandeira e modalidade internas não verificadas';
   if(!cielo.length) document.getElementById('analysisScope').textContent = 'Recebimentos PIX';
   document.getElementById('tab-cards').hidden = !state.cardAudit;
@@ -848,8 +944,10 @@ function renderResults(){
   }
   if(state.cardAudit){
     var pending = state.cardAudit.rows.filter(function(r){ return r.issues.length; }).length;
-    if(pending){ statusEl.textContent = 'Conferir cartões'; statusEl.className = 'status-badge review'; statusSub.textContent = pending + ' venda(s) com pendências nos detalhes'; }
-    document.getElementById('valueEmptyNote').textContent = pending ? 'Os valores batem. Há ' + pending + ' venda(s) para revisar na aba Detalhes dos cartões.' : 'Valores e dados dos cartões conferidos nos relatórios enviados.';
+    if(pending && state.divergences.length === 0){ statusEl.textContent = 'Conferir cartões'; statusEl.className = 'status-badge review'; statusSub.textContent = pending + ' venda(s) com pendências nos detalhes'; }
+    document.getElementById('valueEmptyNote').textContent = state.divergences.length
+      ? 'Há divergências de valor nesta loja. Confira a tabela e os detalhes dos cartões.'
+      : pending ? 'Os valores batem. Há ' + pending + ' venda(s) para revisar na aba Detalhes dos cartões.' : 'Valores e dados dos cartões conferidos nos relatórios enviados.';
     renderCardAudit();
   } else {
     document.getElementById('valueEmptyNote').textContent = 'Nenhuma divergência de valor encontrada. Adicione os Lançamentos para conferir os dados internos dos cartões.';
@@ -966,6 +1064,7 @@ function buildCardGroups(audit, cielo){
 }
 
 function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.cielo); }
+function storeFileSuffix(){ return state.storeRuns.length ? '_loja_' + state.storeRuns[state.activeStoreIndex].label.match(/\d+/)[0] : ''; }
 
 function renderCardAudit(){
   var audit = state.cardAudit, rows = audit.rows;
@@ -1028,7 +1127,7 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   var ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = Object.keys(rows[0] || {}).map(function(){ return { wch: 24 }; });
   XLSX.utils.book_append_sheet(wb, ws, 'Conferência de cartões');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cardGroups().map(function(g){ return { 'Categoria': g.categoria, 'Vendas sistema': g.qtdSistema, 'Total sistema': g.sistema / 100, 'Vendas Cielo': g.qtdCielo, 'Total Cielo': g.cielo / 100, 'Diferença': (g.sistema - g.cielo) / 100 }; })), 'Totais por categoria');
-  XLSX.writeFile(wb, 'conferencia_cartoes_' + new Date().toISOString().slice(0,10) + '.xlsx');
+  XLSX.writeFile(wb, 'conferencia_cartoes' + storeFileSuffix() + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 });
 
 function badgeFor(tipo){
@@ -1074,7 +1173,7 @@ document.getElementById('btnExport').addEventListener('click', function(){
   XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
 
   var dataStr = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, 'divergencias_conciliacao_' + dataStr + '.xlsx');
+  XLSX.writeFile(wb, 'divergencias_conciliacao' + storeFileSuffix() + '_' + dataStr + '.xlsx');
   showToast('Relatório exportado com sucesso.');
 });
 
@@ -1103,7 +1202,7 @@ document.getElementById('btnExportCompare').addEventListener('click', function()
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Comparativo');
   var dataStr = new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb, 'comparativo_linha_a_linha_' + dataStr + '.xlsx');
+  XLSX.writeFile(wb, 'comparativo_linha_a_linha' + storeFileSuffix() + '_' + dataStr + '.xlsx');
   showToast('Comparativo exportado com sucesso.');
 });
 

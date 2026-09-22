@@ -117,6 +117,12 @@
 .tool-conciliacao .optional-label{ display:inline-block; font-size:9px; margin-left:4px; padding:3px 6px; border-radius:5px; color:var(--gray-500); background:var(--gray-100); text-transform:none; }
 .tool-conciliacao #btnAddDetails{ padding:8px 10px; font-size:12px; }
 .tool-conciliacao .result-context{ margin:30px 0 14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--gray-500); }
+.tool-conciliacao .store-tabs{ display:flex; gap:8px; overflow-x:auto; margin-top:26px; padding-bottom:4px; }
+.tool-conciliacao .store-tabs[hidden]{ display:none; }
+.tool-conciliacao .store-tabs button{ flex:none; border:1px solid var(--gray-200); border-radius:10px; background:var(--card-bg); color:var(--gray-500); padding:10px 15px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.tool-conciliacao .store-tabs button.active{ color:var(--sky); border-color:var(--sky); background:var(--sky-bg); }
+.tool-conciliacao .store-tabs button:hover{ border-color:var(--sky); }
+.tool-conciliacao .store-tabs + .result-context{ margin-top:20px; }
 .tool-conciliacao .result-tabs{ display:flex; gap:5px; border-bottom:1px solid var(--gray-200); }
 .tool-conciliacao .result-tabs button{ position:relative; border:0; background:transparent; color:var(--gray-500); font-weight:600; font-family:inherit; font-size:13px; padding:15px 20px; cursor:pointer; border-bottom:3px solid transparent; }
 .tool-conciliacao .result-tabs button.active{ color:var(--sky); border-bottom-color:var(--sky); }

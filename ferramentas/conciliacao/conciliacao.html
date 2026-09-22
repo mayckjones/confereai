@@ -13,7 +13,7 @@
     </div>
     <h3>Arraste os arquivos aqui</h3>
     <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + Cielo (ou extrato PIX).</p>
-    <p class="dz-extra">Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Identificamos cada relatório automaticamente.</p>
+    <p class="dz-extra">Para uma loja, envie Relação, Cielo e, se desejar, Lançamentos. Para várias lojas, envie a Relação completa, os Lançamentos e um PDF Cielo por loja; os resultados aparecem em abas.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -76,6 +76,7 @@
   <!-- RESULTS -->
   <div class="results-wrap" id="resultsWrap">
 
+    <div class="store-tabs" id="storeTabs" role="tablist" aria-label="Lojas conciliadas" hidden></div>
     <div class="result-context"><span class="badge b-blue" id="analysisMode">Conciliação de valores</span><span id="analysisScope">Valores brutos de venda</span></div>
     <div class="result-tabs" role="tablist" aria-label="Visões da conciliação">
       <button id="tab-overview" role="tab" aria-selected="true" aria-controls="view-overview" data-view="overview" class="active">Visão geral</button>
