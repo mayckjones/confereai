@@ -24,6 +24,18 @@ const launchFixture = [
   '1 - MASTERCARD 1427 2 92,47 1,99 90,63 000500014', 'Total Geral...: 2 184,95'
 ];
 
+test('Relação preserva Cx/Tu e código do vendedor para identificar o responsável', () => {
+  const [parsed] = engine.parseCaixaLines(['3-LOJA 3', '1225926 Bal 342150 19/09/2026 07:31 3/ 1 53 0,0% Cartao Mag 60,96']);
+  assert.equal(parsed.caixa, '3');
+  assert.equal(parsed.turno, '1');
+  assert.equal(parsed.caixaTurno, '3/1');
+  assert.equal(parsed.codigoVendedor, '53');
+
+  const result = engine.reconcile([parsed], [], [{ ...bank(59.96, '07:31'), data: parsed.data }]);
+  assert.equal(result.divergences[0].caixaTurno, '3/1');
+  assert.equal(result.divergences[0].codigoVendedor, '53');
+});
+
 test('parcelas se somam em centavos, com NSU preservado e total impresso validado', () => {
   const lines = engine.parseCardLaunchLines(launchFixture);
   const groups = engine.aggregateCardLaunches(lines);

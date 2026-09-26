@@ -67,6 +67,11 @@ function paymentLabel(tx, row){
   return '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span> <span class="' + (row.installments ? 'field-warning' : 'muted') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
 }
 
+function responsibilityMeta(tx){
+  if(!tx || (!tx.caixaTurno && !tx.codigoVendedor)) return '';
+  return '<small class="responsibility-meta">Cx/Tu ' + escapeHtml(tx.caixaTurno || '—') + ' · Vend. ' + escapeHtml(tx.codigoVendedor || '—') + '</small>';
+}
+
 // Cada parcela permanece na origem; apenas a visão por venda é consolidada.
 function parseCardLaunchLines(lines){
   var data = null, loja = '', out = [];
@@ -195,6 +200,9 @@ function parseCaixaLines(lines){
   var lastData = null;
   var lastHora = null;
   var lastDoc = '';
+  var lastCaixa = '';
+  var lastTurno = '';
+  var lastVendedor = '';
   var loja = '';
 
   function readLine(line, isExtra){
@@ -209,14 +217,18 @@ function parseCaixaLines(lines){
     while((m = re.exec(line)) !== null) valores.push(m);
     if(valores.length === 0) return false;
 
-    var data, hora, documento;
+    var data, hora, documento, caixa, turno, codigoVendedor;
     var timeM = line.match(timeRe);
+    var responsibilityM = line.match(/\b(\d+)\s*\/\s*(\d+)\s+(\d+)\s+\d+(?:[.,]\d+)?%/);
 
     if(isExtra){
       if(!lastData) return false;
       data = lastData;
       hora = lastHora;
       documento = lastDoc;
+      caixa = lastCaixa;
+      turno = lastTurno;
+      codigoVendedor = lastVendedor;
     } else {
       var valorStr = valores[valores.length - 1][1];
       var stripped = line
@@ -228,10 +240,16 @@ function parseCaixaLines(lines){
       data = dateM[1];
       hora = timeM ? timeM[1] : null;
       documento = docM ? docM[1] : '';
+      caixa = responsibilityM ? responsibilityM[1] : '';
+      turno = responsibilityM ? responsibilityM[2] : '';
+      codigoVendedor = responsibilityM ? responsibilityM[3] : '';
 
       lastData = data;
       lastHora = hora;
       lastDoc = documento;
+      lastCaixa = caixa;
+      lastTurno = turno;
+      lastVendedor = codigoVendedor;
     }
 
     var modalidade = detectModalidadeFromText(line);
@@ -247,6 +265,10 @@ function parseCaixaLines(lines){
       documento: documento,
       registro: documento,
       loja: loja,
+      caixa: caixa,
+      turno: turno,
+      caixaTurno: caixa && turno ? caixa + '/' + turno : '',
+      codigoVendedor: codigoVendedor,
       valor: valor,
       raw: line
     });
@@ -560,6 +582,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
         tipo: tipo, modalidade: modalidadeLabel,
         data: item.caixa.data, hora: item.caixa.hora || item.banco.hora || '—',
         documento: item.caixa.documento || '—',
+        caixaTurno: item.caixa.caixaTurno || '', codigoVendedor: item.caixa.codigoVendedor || '',
         valorCaixa: item.caixa.valor, valorBanco: item.banco.valor,
         origemBanco: item.banco.origem
       });
@@ -568,6 +591,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
         tipo: tipo, modalidade: modalidadeLabel,
         data: item.data, hora: item.hora || '—',
         documento: item.documento || '—',
+        caixaTurno: item.caixaTurno || '', codigoVendedor: item.codigoVendedor || '',
         valorCaixa: item.valor, valorBanco: null, origemBanco: '—'
       });
     } else if(tipo === 'sobra_banco'){
@@ -575,6 +599,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
         tipo: tipo, modalidade: modalidadeLabel,
         data: item.data, hora: item.hora || '—',
         documento: item.documento || '—',
+        caixaTurno: '', codigoVendedor: '',
         valorCaixa: null, valorBanco: item.valor, origemBanco: item.origem
       });
     }
@@ -982,7 +1007,7 @@ function renderResults(){
     divEmpty.style.display = 'none';
     state.divergences.slice().sort(function(a,b){ return (a.data || '').localeCompare(b.data || ''); }).forEach(function(d){
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + badgeFor(d.tipo) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
+      tr.innerHTML = '<td>' + badgeFor(d.tipo) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + responsibilityMeta(d) + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
       divBody.appendChild(tr);
     });
   }
@@ -1102,7 +1127,7 @@ function renderCardRows(){
   }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
     var tx = r.sale || r.launch || r.bank;
-    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small></td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return '<span class="audit-issue">' + escapeHtml(issue) + '</span>'; }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return '<span class="audit-issue">' + escapeHtml(issue) + '</span>'; }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
   }).join('');
   document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
   document.getElementById('cardEmpty').hidden = rows.length > 0;
@@ -1114,6 +1139,7 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   if(!state.cardAudit) return;
   var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank; return {
     'Data': tx.data ? formatDateBR(tx.data) : '', 'Registro': (r.sale || r.launch || {}).registro || '',
+    'Cx/Tu': r.sale && r.sale.caixaTurno || '', 'Código vendedor': r.sale && r.sale.codigoVendedor || '',
     'Hora sistema': r.sale && r.sale.hora || '', 'Hora Cielo': r.bank && r.bank.hora || '', 'NSU interno': r.launch && r.launch.nsu || '',
     'Valor Relação': r.sale ? r.sale.valor : '', 'Valor Cielo': r.bank ? r.bank.valor : '',
     'Bandeira sistema': r.launch && r.launch.bandeira || '', 'Bandeira Cielo': r.bank && r.bank.bandeira || '',
@@ -1150,13 +1176,15 @@ document.getElementById('btnExport').addEventListener('click', function(){
       'Data': d.data ? formatDateBR(d.data) : '',
       'Hora': d.hora || '',
       'Documento': d.documento || '',
+      'Cx/Tu': d.caixaTurno || '',
+      'Código vendedor': d.codigoVendedor || '',
       'Valor Caixa (R$)': d.valorCaixa !== null && d.valorCaixa !== undefined ? Number(d.valorCaixa.toFixed(2)) : '',
       'Valor Banco (R$)': d.valorBanco !== null && d.valorBanco !== undefined ? Number(d.valorBanco.toFixed(2)) : '',
       'Origem Banco': d.origemBanco || ''
     };
   });
   var ws = XLSX.utils.json_to_sheet(rows);
-  ws['!cols'] = [{wch:26},{wch:12},{wch:12},{wch:8},{wch:14},{wch:16},{wch:16},{wch:14}];
+  ws['!cols'] = [{wch:26},{wch:12},{wch:12},{wch:8},{wch:14},{wch:9},{wch:16},{wch:16},{wch:16},{wch:14}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Divergências');
 
@@ -1187,6 +1215,8 @@ document.getElementById('btnExportCompare').addEventListener('click', function()
       'Caixa - Data': left && left.data ? formatDateBR(left.data) : '—',
       'Caixa - Hora': left && left.hora ? left.hora : '—',
       'Caixa - Documento': left && left.documento ? left.documento : '—',
+      'Caixa - Cx/Tu': left && left.caixaTurno ? left.caixaTurno : '—',
+      'Caixa - Código vendedor': left && left.codigoVendedor ? left.codigoVendedor : '—',
       'Caixa - Valor (R$)': left && left.valor !== null ? Number(left.valor.toFixed(2)) : '',
       'Caixa - Linha Lida': left && left.raw ? left.raw : '—',
       'Lado B (#)': right ? ++countB2 : '—',

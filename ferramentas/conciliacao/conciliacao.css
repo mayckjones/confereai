@@ -163,6 +163,7 @@
 .tool-conciliacao .field-warning{ color:var(--amber) !important; }
 .tool-conciliacao .audit-issue{ display:block; font-size:10px; font-weight:600; padding:5px 8px; border-radius:5px; background:var(--amber-bg); color:var(--amber); width:fit-content; margin-bottom:4px; }
 .tool-conciliacao .audit-success{ color:var(--green); font-size:11px; font-weight:600; }
+.tool-conciliacao .responsibility-meta{ display:block; margin-top:4px; color:var(--gray-400); font-family:inherit; font-size:9.5px; font-weight:500; white-space:nowrap; }
 .tool-conciliacao .audit-evidence{ margin-top:8px; font-size:10px; color:var(--gray-500); max-width:290px; }
 .tool-conciliacao .audit-evidence summary{ cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
 .tool-conciliacao .audit-evidence p{ font-family:var(--mono); overflow-wrap:anywhere; line-height:1.7; }
