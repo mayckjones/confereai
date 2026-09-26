@@ -27,13 +27,15 @@ window.__tool_init_recibos = function() {
     ? ('data:image/jpeg;base64,' + window.FARMACIA_LOGO_BASE64)
     : 'ferramentas/recibos/farmacia_logo.jpeg';
 
-  let mestreConfig = {
+  const criarConfigPadrao = () => ({
     empresa: 'FARMACIA DO TRABALHADOR DE ALAGOAS',
     referente: 'Referente a dobra e alimentação no fim de semana',
     emissao: obterDataAtualPorExtenso('Maceió'),
     loja: '',
     logoUrl: defaultLogoDataUri
-  };
+  });
+
+  let mestreConfig = criarConfigPadrao();
 
   // ELEMENTOS DO DOM
   const dropzone = document.getElementById('reciboDropzone');
@@ -112,6 +114,17 @@ window.__tool_init_recibos = function() {
   const btnDownloadAllDocx = document.getElementById('btnDownloadAllDocx');
   const btnDownloadAllPdf = document.getElementById('btnDownloadAllPdf');
   const btnPrintPreview = document.getElementById('btnPrintPreview');
+
+  function restaurarConfigMestrePadrao() {
+    mestreConfig = criarConfigPadrao();
+    mestreEmpresa.value = mestreConfig.empresa;
+    mestreCNPJ.value = '';
+    mestreReferente.value = mestreConfig.referente;
+    mestreEmissao.value = mestreConfig.emissao;
+    if (mestreLoja) mestreLoja.value = '';
+    if (mestreLogoInput) mestreLogoInput.value = '';
+    atualizarLogoVisualizacao();
+  }
 
 
   // =========================================================================
@@ -238,6 +251,10 @@ window.__tool_init_recibos = function() {
       showToast('Nenhum registro encontrado na planilha.', true);
       return;
     }
+
+    // Cada arquivo é um documento independente. Alterações feitas no Recibo Mestre
+    // do documento anterior não devem ser herdadas pela próxima importação.
+    restaurarConfigMestrePadrao();
 
     // Garante que todo recibo tenha o número da loja (herda da primeira linha ou fallback se vier em branco)
     const lojaPadrao = (mestreConfig.loja && mestreConfig.loja.trim()) || 
@@ -581,7 +598,6 @@ window.__tool_init_recibos = function() {
     }
   });
 
-
   // =========================================================================
   // RECIBO MESTRE (CONFIGURAÇÃO E EDIÇÃO EM MASSA)
   // =========================================================================
@@ -922,6 +938,7 @@ window.__tool_init_recibos = function() {
 
   btnRemoverArquivo.addEventListener('click', () => {
     recibosList = [];
+    restaurarConfigMestrePadrao();
     workspace.style.display = 'none';
     fileCard.style.display = 'none';
     dropzone.style.display = 'block';
