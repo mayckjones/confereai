@@ -78,7 +78,11 @@ function brandLabel(brand, warning){
 function paymentLabel(tx, row){
   var mode = tx.modalidade, debit = mode === 'Debito', credit = mode === 'Credito';
   var icon = debit ? '<path d="M3 7h15v12H3zM6 3h15v12M6 12h9M12 9l3 3-3 3"/>' : '<rect x="2" y="4" width="20" height="16" rx="3"/><path d="M2 9h20M6 15h4"/>';
-  return (tx.canal ? '<span class="card-channel">' + escapeHtml(tx.canal) + '</span> ' : '') + '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span> <span class="' + (row.installments ? 'field-warning' : 'muted') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
+  var channel = tx.canal ? '<span class="card-channel ' + (tx.canal === 'POS' ? 'pos' : 'tef') + '">' + escapeHtml(tx.canal) + '</span> ' : '';
+  var payment = '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span>';
+  var installmentWarning = row.installments || (tx.faixaParcelas && !tx.faixaParcelas.includes(tx.parcelas));
+  var installment = '<span class="installment-label ' + (tx.parcelas === 1 ? 'one' : tx.parcelas === 2 ? 'two' : tx.parcelas === 3 ? 'three' : 'other') + (installmentWarning ? ' field-warning' : '') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
+  return channel + payment + ' ' + installment;
 }
 
 function responsibilityMeta(tx){

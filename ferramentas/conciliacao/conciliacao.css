@@ -160,7 +160,7 @@
 .tool-conciliacao .card-audit-table td:first-child{ min-width:170px; }
 .tool-conciliacao .card-audit-table td:nth-child(3),.tool-conciliacao .card-audit-table td:nth-child(4){ min-width:185px; }
 .tool-conciliacao .card-audit-table small{ display:block; font-size:10px; color:var(--gray-500); margin-top:7px; font-family:inherit; }
-.tool-conciliacao .field-warning{ color:var(--amber) !important; }
+.tool-conciliacao .brand-label.field-warning{ color:var(--amber); }
 .tool-conciliacao .audit-issue{ display:block; font-size:10px; font-weight:600; padding:5px 8px; border-radius:5px; background:var(--amber-bg); color:var(--amber); width:fit-content; margin-bottom:4px; }
 .tool-conciliacao .audit-success{ color:var(--green); font-size:11px; font-weight:600; }
 .tool-conciliacao .responsibility-meta{ display:block; margin-top:4px; color:var(--gray-400); font-family:inherit; font-size:9.5px; font-weight:500; white-space:nowrap; }
@@ -184,8 +184,24 @@
 .tool-conciliacao .payment-label.debit{ background:var(--sky-bg); color:var(--sky); }
 .tool-conciliacao .payment-label.credit{ background:#f1eafd; color:#7546ac; }
 .tool-conciliacao .payment-label.unknown{ background:var(--gray-100); color:var(--gray-500); }
-.tool-conciliacao .payment-label.field-warning{ background:var(--amber-bg); }
+.tool-conciliacao .card-channel,.tool-conciliacao .installment-label{ display:inline-flex; align-items:center; justify-content:center; margin-top:8px; padding:4px 7px; border-radius:5px; font-size:10px; font-weight:700; line-height:1.2; vertical-align:middle; }
+.tool-conciliacao .card-channel.pos{ background:#fff0d7; color:#995200; }
+.tool-conciliacao .card-channel.tef{ background:#def7f2; color:#00675f; }
+.tool-conciliacao .installment-label.one{ background:#e7f7eb; color:#166534; }
+.tool-conciliacao .installment-label.two{ background:#fff0d6; color:#a05c00; }
+.tool-conciliacao .installment-label.three{ background:#fde7f2; color:#ad2168; }
+.tool-conciliacao .installment-label.other{ background:var(--gray-100); color:var(--gray-500); }
+.tool-conciliacao .payment-label.field-warning,.tool-conciliacao .installment-label.field-warning{ box-shadow:0 0 0 2px var(--amber); }
+.tool-conciliacao .card-color-legend{ display:flex; align-items:center; flex-wrap:wrap; gap:8px 18px; padding:8px 18px 12px; border-top:1px solid var(--gray-100); color:var(--gray-500); font-size:10px; }
+.tool-conciliacao .card-color-legend > span{ display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.tool-conciliacao .card-color-legend .card-channel,.tool-conciliacao .card-color-legend .payment-label,.tool-conciliacao .card-color-legend .installment-label{ margin-top:0; }
+.tool-conciliacao .card-color-legend .legend-warning i{ display:inline-block; width:13px; height:13px; border:2px solid var(--amber); border-radius:4px; }
 [data-theme="dark"] .tool-conciliacao .payment-label.credit{ background:#342742; color:#c4a2f2; }
+[data-theme="dark"] .tool-conciliacao .card-channel.pos{ background:#483216; color:#ffc078; }
+[data-theme="dark"] .tool-conciliacao .card-channel.tef{ background:#173f3b; color:#73ddca; }
+[data-theme="dark"] .tool-conciliacao .installment-label.one{ background:#1b3d2b; color:#8ae5aa; }
+[data-theme="dark"] .tool-conciliacao .installment-label.two{ background:#493518; color:#ffd184; }
+[data-theme="dark"] .tool-conciliacao .installment-label.three{ background:#48243b; color:#ff9ecb; }
 [data-theme="dark"] .tool-conciliacao{ --amber:#f5b549; --green:#4ade80; --sky:#82aeff; }
 [data-theme="dark"] .tool-conciliacao .detail-eyebrow,[data-theme="dark"] .tool-conciliacao .result-tabs button.active,[data-theme="dark"] .tool-conciliacao .detail-filters button.active,[data-theme="dark"] .tool-conciliacao .payment-label.debit{ color:#82aeff; }
 @media(max-width:1000px){ .tool-conciliacao .detail-upload{ grid-template-columns:1fr; gap:16px; } .tool-conciliacao .detail-heading{ align-items:flex-start; flex-direction:column; } .tool-conciliacao .net-summary{ grid-template-columns:repeat(2,1fr); } }
@@ -206,4 +222,3 @@
   .tool-conciliacao .brand-label{ font-size:11px; gap:5px; flex-wrap:wrap; }
   .tool-conciliacao .detail-panel .table-scroll{ max-height:650px; }
 }
-.tool-conciliacao .card-channel{display:inline-block; margin-right:4px; padding:2px 5px; border-radius:4px; background:var(--sky-bg); color:var(--sky); font-size:10px; font-weight:700; vertical-align:middle;}
