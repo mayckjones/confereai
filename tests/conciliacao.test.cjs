@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -175,9 +175,10 @@ test('parcela fora da faixa do cartão cadastrado aparece sem perder o vínculo 
   assert.match(warning.detail, /cartão escolhido nessa segunda etapa/);
   assert.doesNotMatch(engine.cardRangeWarning({ ...row, confidence: 'valor' }).detail, /A Cielo também informa/);
 });
-test('cores do canal, modalidade e parcelas continuam distintas em divergências', () => {
+test('indicadores ficam alinhados e somente divergências recebem destaque', () => {
   const posCredit = engine.paymentLabel({ canal: 'POS', modalidade: 'Credito', parcelas: 3 }, { mode: true, installments: true });
   const tefDebit = engine.paymentLabel({ canal: 'TEF', modalidade: 'Debito', parcelas: 1 }, { mode: true, installments: true });
+  assert.match(posCredit, /^<span class="card-payment-row">/);
   assert.match(posCredit, /card-channel pos/);
   assert.match(posCredit, /payment-label credit field-warning/);
   assert.match(posCredit, /installment-label three field-warning/);
@@ -186,6 +187,11 @@ test('cores do canal, modalidade e parcelas continuam distintas em divergências
   assert.match(tefDebit, /installment-label one field-warning/);
   const wrongCardRange = engine.paymentLabel({ canal: 'TEF', modalidade: 'Credito', parcelas: 2, faixaParcelas: [1] }, { mode: false, installments: false });
   assert.match(wrongCardRange, /installment-label two field-warning/);
+  assert.doesNotMatch(wrongCardRange, /payment-label credit field-warning/);
+  const matched = engine.paymentLabel({ canal: 'TEF', modalidade: 'Credito', parcelas: 2, faixaParcelas: [2, 3] }, { mode: false, installments: false });
+  assert.doesNotMatch(matched, /field-warning/);
+  assert.doesNotMatch(engine.brandLabel('Mastercard', false), /field-warning/);
+  assert.match(engine.brandLabel('Mastercard', true), /brand-label field-warning/);
 });
 test('PIX continua conciliando recebimentos no próximo dia útil', () => {
   const result = engine.reconcile([{ ...sale(10, null), data: '2026-09-12', modalidade: 'PIX' }], [{ ...bank(10, null), data: '2026-09-14', modalidade: 'PIX', origem: 'Sicredi' }], []);
