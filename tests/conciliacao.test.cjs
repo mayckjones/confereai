@@ -192,6 +192,8 @@ test('indicadores ficam alinhados e somente divergências recebem destaque', () 
   assert.doesNotMatch(matched, /field-warning/);
   assert.doesNotMatch(engine.brandLabel('Mastercard', false), /field-warning/);
   assert.match(engine.brandLabel('Mastercard', true), /brand-label field-warning/);
+  assert.match(engine.brandLabel('Hipercard', false), /hipercard-shape/);
+  assert.match(engine.brandLabel('Hipercard', true), /brand-label field-warning/);
 });
 test('PIX continua conciliando recebimentos no próximo dia útil', () => {
   const result = engine.reconcile([{ ...sale(10, null), data: '2026-09-12', modalidade: 'PIX' }], [{ ...bank(10, null), data: '2026-09-14', modalidade: 'PIX', origem: 'Sicredi' }], []);

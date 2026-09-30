@@ -161,6 +161,7 @@
 .tool-conciliacao .card-audit-table td:nth-child(3),.tool-conciliacao .card-audit-table td:nth-child(4){ min-width:185px; }
 .tool-conciliacao .card-audit-table small{ display:block; font-size:10px; color:var(--gray-500); margin-top:7px; font-family:inherit; }
 .tool-conciliacao .brand-mark svg{ filter:grayscale(1); opacity:.7; }
+.tool-conciliacao .brand-label:not(.field-warning) .hipercard-shape{ fill:#d1d5db; }
 .tool-conciliacao .brand-label.field-warning{ color:var(--amber); }
 .tool-conciliacao .brand-label.field-warning .brand-mark{ border-color:var(--amber); background:var(--amber-bg); }
 .tool-conciliacao .brand-label.field-warning .brand-mark svg{ filter:none; opacity:1; }
