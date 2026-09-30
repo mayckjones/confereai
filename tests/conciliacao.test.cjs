@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -167,6 +167,13 @@ test('parcela fora da faixa do cartão cadastrado aparece sem perder o vínculo 
   assert.ok(row.issues.includes('Parcelas fora da faixa do cartão cadastrado'));
   assert.equal(row.internalOK, true);
   assert.equal(row.installments, false);
+  const warning = engine.cardRangeWarning(row);
+  assert.equal(warning.title, 'Venda em 2x; cartão selecionado de 1x');
+  assert.match(warning.detail, /O caixa registrou 2x para a venda \(coluna Parc\. dos Lançamentos\)/);
+  assert.match(warning.detail, /“TEF MASTER 1X” \(cód\. 1\), cadastrado para 1x/);
+  assert.match(warning.detail, /A Cielo também informa 2x/);
+  assert.match(warning.detail, /cartão escolhido nessa segunda etapa/);
+  assert.doesNotMatch(engine.cardRangeWarning({ ...row, confidence: 'valor' }).detail, /A Cielo também informa/);
 });
 test('cores do canal, modalidade e parcelas continuam distintas em divergências', () => {
   const posCredit = engine.paymentLabel({ canal: 'POS', modalidade: 'Credito', parcelas: 3 }, { mode: true, installments: true });

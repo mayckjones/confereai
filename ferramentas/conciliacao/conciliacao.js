@@ -676,6 +676,22 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
   return { rows: rows, groups: groups, lineCount: launchLines.length, internalCount: rows.filter(function(r){ return r.internalOK; }).length };
 }
 
+function cardRangeWarning(row){
+  var launch = row.launch;
+  if(!launch || !launch.faixaParcelas || launch.faixaParcelas.includes(launch.parcelas)) return null;
+  var actual = launch.parcelas + 'x';
+  var registered = launch.faixaParcelas.map(function(n){ return n + 'x'; }).join(' ou ');
+  var card = launch.descricao.replace(/^\d+\s*-\s*/, '');
+  var detail = 'O caixa registrou ' + actual + ' para a venda (coluna Parc. dos Lançamentos). Na escolha seguinte, foi selecionado o cartão “' + card + '” (cód. ' + launch.codigoCartao + '), cadastrado para ' + registered + '. ';
+  if(row.confidence === 'horario' && row.bank && row.bank.parcelas){
+    detail += row.bank.parcelas === launch.parcelas
+      ? 'A Cielo também informa ' + actual + '. '
+      : 'A Cielo informa ' + row.bank.parcelas + 'x; confira também o comprovante. ';
+  }
+  detail += 'Confira o cartão escolhido nessa segunda etapa.';
+  return { title: 'Venda em ' + actual + '; cartão selecionado de ' + registered, detail: detail };
+}
+
 function buildStoreRuns(caixaTx, cieloTx, launchTx){
   var storeIds = Array.from(new Set(caixaTx.map(function(tx){ return tx.loja; }))).filter(function(id){ return id !== '2'; });
   if(!storeIds.length) throw new Error('A Relação enviada contém apenas a loja 2, que não participa desta conciliação Cielo.');
@@ -1161,9 +1177,16 @@ function renderCardRows(){
     if(!tx) return '<span class="muted">Não identificado</span>';
     return brandLabel(tx.bandeira, row.brand) + paymentLabel(tx, row) + '<small>' + (tx.codigoCartao ? 'Cód. ' + escapeHtml(tx.codigoCartao) + ' · ' : '') + (tx.hora ? 'Hora Cielo ' + escapeHtml(tx.hora) : 'NSU ' + escapeHtml(tx.nsu || 'não informado')) + '</small>';
   }
+  function issueCell(issue, row){
+    if(issue === 'Parcelas fora da faixa do cartão cadastrado'){
+      var warning = cardRangeWarning(row);
+      if(warning) return '<div class="audit-card-range"><strong>' + escapeHtml(warning.title) + '</strong><p>' + escapeHtml(warning.detail) + '</p></div>';
+    }
+    return '<span class="audit-issue">' + escapeHtml(issue) + '</span>';
+  }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
     var tx = r.sale || r.launch || r.bank;
-    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return '<span class="audit-issue">' + escapeHtml(issue) + '</span>'; }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
   }).join('');
   document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
   document.getElementById('cardEmpty').hidden = rows.length > 0;
@@ -1173,7 +1196,7 @@ document.getElementById('cardSearch').addEventListener('input', renderCardRows);
 
 document.getElementById('btnExportDetails').addEventListener('click', function(){
   if(!state.cardAudit) return;
-  var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank; return {
+  var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank, rangeWarning = cardRangeWarning(r); return {
     'Data': tx.data ? formatDateBR(tx.data) : '', 'Registro': (r.sale || r.launch || {}).registro || '',
     'Cx/Tu': r.sale && r.sale.caixaTurno || '', 'Código vendedor': r.sale && r.sale.codigoVendedor || '',
     'Hora sistema': r.sale && r.sale.hora || '', 'Hora Cielo': r.bank && r.bank.hora || '', 'NSU interno': r.launch && r.launch.nsu || '',
@@ -1184,7 +1207,7 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
     'Modalidade sistema': r.launch ? MODAL_LABEL[r.launch.modalidade] : '', 'Modalidade Cielo': r.bank ? MODAL_LABEL[r.bank.modalidade] : '',
     'Parcelas sistema': r.launch && r.launch.parcelas || '', 'Parcelas Cielo': r.bank && r.bank.parcelas || '',
     'Líquido Cielo': r.bank ? r.bank.valorLiquido : '',
-    'Conferência': r.issues.join('; ') || 'Conferido', 'Vínculo': r.confidence === 'horario' ? 'Data e horário próximo' : 'Revisar',
+    'Conferência': r.issues.join('; ') || 'Conferido', 'Aviso do cartão': rangeWarning ? rangeWarning.detail : '', 'Vínculo': r.confidence === 'horario' ? 'Data e horário próximo' : 'Revisar',
     'Origem Relação': r.sale && r.sale.raw || '', 'Origem Lançamentos': r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : '', 'Origem Cielo': r.bank && r.bank.raw || ''
   }; });
   var wb = XLSX.utils.book_new();

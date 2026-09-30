@@ -162,6 +162,9 @@
 .tool-conciliacao .card-audit-table small{ display:block; font-size:10px; color:var(--gray-500); margin-top:7px; font-family:inherit; }
 .tool-conciliacao .brand-label.field-warning{ color:var(--amber); }
 .tool-conciliacao .audit-issue{ display:block; font-size:10px; font-weight:600; padding:5px 8px; border-radius:5px; background:var(--amber-bg); color:var(--amber); width:fit-content; margin-bottom:4px; }
+.tool-conciliacao .audit-card-range{ max-width:340px; margin-bottom:7px; padding:9px 10px; border-left:3px solid var(--amber); border-radius:6px; background:var(--amber-bg); }
+.tool-conciliacao .audit-card-range strong{ display:block; color:var(--amber); font-size:11px; line-height:1.4; }
+.tool-conciliacao .audit-card-range p{ margin:5px 0 0; color:var(--gray-700); font-size:10.5px; line-height:1.5; }
 .tool-conciliacao .audit-success{ color:var(--green); font-size:11px; font-weight:600; }
 .tool-conciliacao .responsibility-meta{ display:block; margin-top:4px; color:var(--gray-400); font-family:inherit; font-size:9.5px; font-weight:500; white-space:nowrap; }
 .tool-conciliacao .audit-evidence{ margin-top:8px; font-size:10px; color:var(--gray-500); max-width:290px; }
