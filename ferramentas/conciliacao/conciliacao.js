@@ -33,6 +33,19 @@ var STORE_CONFIG = {
   '6': { label: 'Loja 5', establishment: '2800327299' }
 };
 
+// Cadastro de Cartões Magnéticos fornecido pelo sistema (código -> descrição).
+// A coluna Parc. no relatório é a quantidade efetiva de parcelas; o sufixo
+// 1X / 2X - 3X do cadastro indica apenas a faixa permitida para o cartão.
+var CARD_CATALOG = {
+  '1': 'TEF MASTER 1X', '2': 'TEF VISA 1X', '3': 'TEF HIPERC 1X', '4': 'TEF AMEX 1X', '5': 'TEF ELO 1X',
+  '6': 'TEF VISA DEBITO', '7': 'TEF MASTER DEBITO', '8': 'POS AMEX 1X', '9': 'TEF CABAL 1X', '10': 'TEF ELO DEBITO',
+  '11': 'TEF AMEX 2X - 3X', '12': 'TEF CABAL 2X - 3X', '13': 'TEF VISA 2X - 3X', '14': 'TEF ELO 2X - 3X',
+  '15': 'TEF HIPERC 2X - 3X', '16': 'TEF MASTER 2X - 3X', '17': 'POS AMEX 2X - 3X', '18': 'POS CABAL 1X',
+  '19': 'POS CABAL 2X - 3X', '20': 'POS ELO 1X', '21': 'POS ELO 2X - 3X', '22': 'POS HIPERC 2X - 3X',
+  '23': 'POS HIPERC 1X', '24': 'POS MASTER 2X - 3X', '25': 'POS MASTER 1X', '26': 'POS VISA 1X',
+  '27': 'POS VISA 2X - 3X', '28': 'POS ELO DEBITO', '29': 'POS MASTER DEBITO', '30': 'POS VISA DEBITO'
+};
+
 var MODAL_LABEL = { PIX: 'PIX', Debito: 'Débito', Credito: 'Crédito', Dinheiro: 'Dinheiro', Cartao: 'Cartão (não especificado)', Outro: 'Não identificado' };
 
 function normalizeText(value){ return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim(); }
@@ -42,10 +55,11 @@ function sumValues(list, key){ return list.reduce(function(sum, tx){ return sum 
 function detectBrand(value){
   var text = normalizeText(value);
   if(/AMERICAN EXPRESS|AMEX/.test(text)) return 'American Express';
-  if(/MASTERCARD|MASTER CARD/.test(text)) return 'Mastercard';
+  if(/\bMASTER(?:\s?CARD)?\b/.test(text)) return 'Mastercard';
   if(/VISA/.test(text)) return 'Visa';
   if(/\bELO\b/.test(text)) return 'Elo';
-  if(/HIPERCARD/.test(text)) return 'Hipercard';
+  if(/\bHIPERC(?:ARD)?\b/.test(text)) return 'Hipercard';
+  if(/\bCABAL\b/.test(text)) return 'Cabal';
   if(/DINERS/.test(text)) return 'Diners';
   return null;
 }
@@ -64,7 +78,7 @@ function brandLabel(brand, warning){
 function paymentLabel(tx, row){
   var mode = tx.modalidade, debit = mode === 'Debito', credit = mode === 'Credito';
   var icon = debit ? '<path d="M3 7h15v12H3zM6 3h15v12M6 12h9M12 9l3 3-3 3"/>' : '<rect x="2" y="4" width="20" height="16" rx="3"/><path d="M2 9h20M6 15h4"/>';
-  return '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span> <span class="' + (row.installments ? 'field-warning' : 'muted') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
+  return (tx.canal ? '<span class="card-channel">' + escapeHtml(tx.canal) + '</span> ' : '') + '<span class="payment-label ' + (debit ? 'debit' : credit ? 'credit' : 'unknown') + (row.mode ? ' field-warning' : '') + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' + escapeHtml(MODAL_LABEL[mode] || 'Não identificado') + '</span> <span class="' + (row.installments ? 'field-warning' : 'muted') + '">' + (tx.parcelas ? tx.parcelas + 'x' : '—') + '</span>';
 }
 
 function responsibilityMeta(tx){
@@ -86,10 +100,13 @@ function parseCardLaunchLines(lines){
     var date = match[1] ? parseDateAny(match[1]) : data;
     if(!date) throw new Error('Lançamento de cartão sem data: confira o layout do PDF.');
     data = date;
-    var description = match[2], normalized = normalizeText(description).replace(/^\d+\s*-\s*/, '');
+    var description = match[2], code = (description.match(/^(\d+)\s*-/) || [])[1] || '';
+    var normalized = normalizeText(description).replace(/^\d+\s*-\s*/, '').replace(/\s*-\s*/g, ' - ');
+    var canal = (normalized.match(/^(POS|TEF)\b/) || [])[1] || '';
     var modalidade = detectModalidadeFromText(description);
     if(/^(MASTERCARD|VISA)$/.test(normalized)) modalidade = 'Credito';
-    out.push({ origem: 'Lançamentos', data: date, loja: loja, registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, descricao: description, raw: line });
+    var faixaParcelas = /\b2X\s*-\s*3X\b/.test(normalized) ? [2, 3] : /\b1X\b/.test(normalized) ? [1] : null;
+    out.push({ origem: 'Lançamentos', data: date, loja: loja, registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, canal: canal, codigoCartao: code, faixaParcelas: faixaParcelas, cadastroValido: !canal || CARD_CATALOG[code] === normalized, descricao: description, raw: line });
   });
   var declared = lines.map(function(line){ return line.match(/Total Geral[\s.]*:\s*(\d+)\s+([\d.]+,\d{2})/i); }).find(Boolean);
   if(!out.length) throw new Error('Nenhum lançamento de cartão reconhecido. Confira o relatório e o período.');
@@ -119,11 +136,12 @@ function timeDiffMinutes(t1, t2){
 }
 
 function detectModalidadeFromText(text){
-  var t = text.toUpperCase();
+  var t = normalizeText(text);
   if(/CARTEIRA\s*DIGITAL|CART\.?\s*DIG\b/.test(t)) return 'PIX';
   if(/PIX/.test(t)) return 'PIX';
   if(/D[ÉE]B|DEBITO|CARTAO\s*D[ÉE]B/.test(t)) return 'Debito';
   if(/CR[ÉE]D|CREDITO|CARTAO\s*CR[ÉE]D/.test(t)) return 'Credito';
+  if(/\b(?:POS|TEF)\b.*\b(?:1X|2X\s*-\s*3X)\b/.test(t)) return 'Credito';
   if(/DINHEIRO|ESPECIE|ESP[ÉE]CIE|CASH/.test(t)) return 'Dinheiro';
   if(/CART[ÃA]O|CIELO|REDE|GETNET|STONE|VISA|MASTER|ELO\b|TEF/.test(t)) return 'Cartao';
   return 'Outro';
@@ -631,10 +649,12 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
     if(internal.length === 0) issues.push('Sem lançamento interno');
     if(internal.length > 1) issues.push('Mais de um lançamento para o registro');
     if(launch && (launch.linhas.length !== launch.parcelas || launch.linhas.some(function(l){ return l.parcelas !== launch.parcelas; }))) issues.push('Parcelas internas incompletas ou repetidas');
+    if(launch && launch.linhas.some(function(l){ return !l.cadastroValido; })) issues.push('Código e descrição divergentes do cadastro de cartões');
+    if(launch && launch.faixaParcelas && !launch.faixaParcelas.includes(launch.parcelas)) issues.push('Parcelas fora da faixa do cartão cadastrado');
     if(!pair) issues.push('Sem correspondência segura na Cielo');
     if(pair && pair.confidence !== 'horario') issues.push('Conferir vínculo: apenas data e valor');
     if(pair && cents(sale.valor) !== cents(pair.banco.valor)) issues.push('Valor Cielo divergente');
-    var reliable = issues.length === 0 && launch && pair;
+    var reliable = launch && pair && pair.confidence === 'horario' && cents(sale.valor) === cents(pair.banco.valor) && !issues.some(function(issue){ return /Registro repetido|Sem lançamento|Mais de um lançamento|Parcelas internas|Código e descrição/.test(issue); });
     var brand = false, mode = false, installments = false;
     if(reliable){
       if(!launch.bandeira || !pair.banco.bandeira) issues.push('Bandeira não identificada');
@@ -1088,6 +1108,18 @@ function buildCardGroups(audit, cielo){
   return Array.from(groups.values()).sort(function(a,b){ return a.categoria.localeCompare(b.categoria); });
 }
 
+function buildCardChannelGroups(audit){
+  var groups = new Map();
+  audit.rows.filter(function(row){ return row.sale; }).forEach(function(row){
+    var canal = row.launch && row.launch.canal || 'Não identificado';
+    if(!groups.has(canal)) groups.set(canal, { canal: canal, qtd: 0, total: 0 });
+    var group = groups.get(canal);
+    group.qtd++;
+    group.total += cents(row.sale.valor);
+  });
+  return Array.from(groups.values()).sort(function(a,b){ return a.canal.localeCompare(b.canal); });
+}
+
 function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.cielo); }
 function storeFileSuffix(){ return state.storeRuns.length ? '_loja_' + state.storeRuns[state.activeStoreIndex].label.match(/\d+/)[0] : ''; }
 
@@ -1102,14 +1134,14 @@ function renderCardAudit(){
     ['Outras pendências', rows.filter(function(r){ return r.issues.length && !r.brand && !r.mode; }).length, 'Parcelas, valores ou vínculo', 'neutral']
   ];
   document.getElementById('cardMetrics').innerHTML = metrics.map(function(m){ return '<div class="detail-metric ' + m[3] + '"><span>' + m[0] + '</span><strong>' + m[1] + '</strong><small>' + m[2] + '</small></div>'; }).join('');
-  var integrityOK = audit.internalCount === state.parsed.caixa.length && audit.groups.length === state.parsed.caixa.length && !rows.some(function(r){ return r.issues.some(function(i){ return /internas|interno|registro|Relação/.test(i); }); });
+  var integrityOK = audit.internalCount === state.parsed.caixa.length && audit.groups.length === state.parsed.caixa.length && !rows.some(function(r){ return r.issues.some(function(i){ return /internas|interno|registro|Relação|cadastro|faixa/.test(i); }); });
   var banner = document.getElementById('cardIntegrity');
   banner.className = 'integrity-banner ' + (integrityOK ? 'good' : 'warn');
   banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos vinculados' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas classificadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros vinculados à Relação. Total da Relação: ' + fmtBRL(sumValues(state.parsed.caixa)) + '.</p></div>';
   document.getElementById('cardGroupBody').innerHTML = cardGroups().map(function(g){ return '<tr><td>' + escapeHtml(g.categoria) + '</td><td class="num">' + g.qtdSistema + '</td><td class="num">' + fmtBRL(g.sistema / 100) + '</td><td class="num">' + g.qtdCielo + '</td><td class="num">' + fmtBRL(g.cielo / 100) + '</td><td class="num ' + (g.sistema === g.cielo ? 'diff-zero' : 'diff-neg') + '">' + fmtBRL((g.sistema - g.cielo) / 100) + '</td></tr>'; }).join('');
   var grossSystem = sumValues(state.parsed.caixa), grossBank = sumValues(state.parsed.cielo), netBank = sumValues(state.parsed.cielo, 'valorLiquido');
   var bankHasNet = state.parsed.cielo.every(function(t){ return Number.isFinite(t.valorLiquido); });
-  document.getElementById('cardNetSummary').innerHTML = '<div><span>Bruto · Relação</span><strong>' + fmtBRL(grossSystem) + '</strong></div><div><span>Bruto · Cielo</span><strong>' + fmtBRL(grossBank) + '</strong></div><div><span>Diferença bruta</span><strong>' + fmtBRL((cents(grossSystem) - cents(grossBank)) / 100) + '</strong></div><div><span>Taxas · Cielo</span><strong>' + (bankHasNet ? fmtBRL((cents(grossBank) - cents(netBank)) / 100) : '—') + '</strong></div>';
+  document.getElementById('cardNetSummary').innerHTML = '<div><span>Bruto · Relação</span><strong>' + fmtBRL(grossSystem) + '</strong></div><div><span>Bruto · Cielo</span><strong>' + fmtBRL(grossBank) + '</strong></div><div><span>Diferença bruta</span><strong>' + fmtBRL((cents(grossSystem) - cents(grossBank)) / 100) + '</strong></div><div><span>Taxas · Cielo</span><strong>' + (bankHasNet ? fmtBRL((cents(grossBank) - cents(netBank)) / 100) : '—') + '</strong></div>' + buildCardChannelGroups(audit).map(function(g){ return '<div><span>Sistema · ' + escapeHtml(g.canal) + ' (' + g.qtd + ' vendas)</span><strong>' + fmtBRL(g.total / 100) + '</strong></div>'; }).join('');
   renderCardRows();
 }
 
@@ -1123,7 +1155,7 @@ function renderCardRows(){
   document.querySelectorAll('[data-card-filter]').forEach(function(button){ var active = button.dataset.cardFilter === state.cardFilter; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   function cardCell(tx, row){
     if(!tx) return '<span class="muted">Não identificado</span>';
-    return brandLabel(tx.bandeira, row.brand) + paymentLabel(tx, row) + '<small>' + (tx.hora ? 'Hora Cielo ' + escapeHtml(tx.hora) : 'NSU ' + escapeHtml(tx.nsu || 'não informado')) + '</small>';
+    return brandLabel(tx.bandeira, row.brand) + paymentLabel(tx, row) + '<small>' + (tx.codigoCartao ? 'Cód. ' + escapeHtml(tx.codigoCartao) + ' · ' : '') + (tx.hora ? 'Hora Cielo ' + escapeHtml(tx.hora) : 'NSU ' + escapeHtml(tx.nsu || 'não informado')) + '</small>';
   }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
     var tx = r.sale || r.launch || r.bank;
@@ -1142,6 +1174,8 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
     'Cx/Tu': r.sale && r.sale.caixaTurno || '', 'Código vendedor': r.sale && r.sale.codigoVendedor || '',
     'Hora sistema': r.sale && r.sale.hora || '', 'Hora Cielo': r.bank && r.bank.hora || '', 'NSU interno': r.launch && r.launch.nsu || '',
     'Valor Relação': r.sale ? r.sale.valor : '', 'Valor Cielo': r.bank ? r.bank.valor : '',
+    'Código cartão sistema': r.launch && r.launch.codigoCartao || '', 'Canal sistema': r.launch && r.launch.canal || '',
+    'Cartão cadastrado': r.launch && r.launch.descricao || '',
     'Bandeira sistema': r.launch && r.launch.bandeira || '', 'Bandeira Cielo': r.bank && r.bank.bandeira || '',
     'Modalidade sistema': r.launch ? MODAL_LABEL[r.launch.modalidade] : '', 'Modalidade Cielo': r.bank ? MODAL_LABEL[r.bank.modalidade] : '',
     'Parcelas sistema': r.launch && r.launch.parcelas || '', 'Parcelas Cielo': r.bank && r.bank.parcelas || '',
@@ -1153,6 +1187,7 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   var ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = Object.keys(rows[0] || {}).map(function(){ return { wch: 24 }; });
   XLSX.utils.book_append_sheet(wb, ws, 'Conferência de cartões');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cardGroups().map(function(g){ return { 'Categoria': g.categoria, 'Vendas sistema': g.qtdSistema, 'Total sistema': g.sistema / 100, 'Vendas Cielo': g.qtdCielo, 'Total Cielo': g.cielo / 100, 'Diferença': (g.sistema - g.cielo) / 100 }; })), 'Totais por categoria');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildCardChannelGroups(state.cardAudit).map(function(g){ return { 'Canal sistema': g.canal, 'Vendas': g.qtd, 'Total bruto': g.total / 100 }; })), 'Totais POS TEF');
   XLSX.writeFile(wb, 'conferencia_cartoes' + storeFileSuffix() + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 });
 

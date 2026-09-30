@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -133,6 +133,40 @@ test('registro duplicado ou parcela faltante fica pendente', () => {
 test('Cielo preserva bandeira, débito pré-pago, parcelas e líquido', () => {
   const parsed = engine.parseCieloPdfLines(['09/09/2026 16:23 3002105343 13.286.582/0004-09 Débito pré-pago Visa R$ 22,99 -R$ 0,20 R$ 22,79 Aprovada', '09/09/2026 09:01 3002105343 13.286.582/0004-09 Crédito parcelado loja 03x 03 Mastercard R$ 183,97 -R$ 2,94 R$ 181,03 Aprovada', '09/09/2026 11:00 Débito Visa R$ 10,00 Cancelada']);
   assert.equal(parsed.length, 2); assert.equal(parsed[0].bandeira, 'Visa'); assert.equal(parsed[0].modalidade, 'Debito'); assert.equal(parsed[0].valorLiquido, 22.79); assert.equal(parsed[1].parcelas, 3);
+});
+test('novo cadastro separa POS/TEF e reconhece abreviações, débito e faixas de crédito', () => {
+  const lines = engine.parseCardLaunchLines([
+    '1-LOJA 1', '28/09/2026',
+    '25 - POS MASTER 1X 1001 1 10,00 1,39 9,86 123',
+    '29 - POS MASTER DÉBITO 1002 1 20,00 0,85 19,83 124',
+    '15 - TEF HIPERC 2X - 3X 1003 2 15,00 1,60 14,76 125',
+    '15 - TEF HIPERC 2X - 3X 1003 2 15,00 1,60 14,76 125',
+    '9 - TEF CABAL 1X 1004 1 40,00 1,39 39,44 126'
+  ]);
+  assert.deepEqual(Array.from(lines, line => [line.canal, line.bandeira, line.modalidade, line.cadastroValido]), [
+    ['POS', 'Mastercard', 'Credito', true], ['POS', 'Mastercard', 'Debito', true],
+    ['TEF', 'Hipercard', 'Credito', true], ['TEF', 'Hipercard', 'Credito', true],
+    ['TEF', 'Cabal', 'Credito', true]
+  ]);
+  assert.deepEqual(Array.from(lines[2].faixaParcelas), [2, 3]);
+  const sales = [10, 20, 30, 40].map((valor, i) => ({ ...sale(valor, '10:00', String(1001 + i)), data: '2026-09-28', loja: '1' }));
+  const audit = engine.buildCardAudit(sales, lines, [], { matched: [], divergValor: [], sobras: [] });
+  assert.deepEqual(Array.from(engine.buildCardChannelGroups(audit), group => [group.canal, group.qtd, group.total]), [
+    ['POS', 2, 3000], ['TEF', 2, 7000]
+  ]);
+});
+test('parcela fora da faixa do cartão cadastrado aparece sem perder o vínculo com a venda', () => {
+  const launches = engine.parseCardLaunchLines([
+    '1-LOJA 1', '28/09/2026',
+    '1 - TEF MASTER 1X 1001 2 43,97 1,99 43,10 123',
+    '1 - TEF MASTER 1X 1001 2 43,97 1,99 43,10 123'
+  ]);
+  const system = { ...sale(87.94, '07:56', '1001'), data: '2026-09-28', loja: '1' };
+  const cielo = { ...bank(87.94, '07:56'), data: '2026-09-28' };
+  const row = engine.buildCardAudit([system], launches, [cielo], engine.matchCardTransactions([system], [cielo])).rows[0];
+  assert.ok(row.issues.includes('Parcelas fora da faixa do cartão cadastrado'));
+  assert.equal(row.internalOK, true);
+  assert.equal(row.installments, false);
 });
 test('PIX continua conciliando recebimentos no próximo dia útil', () => {
   const result = engine.reconcile([{ ...sale(10, null), data: '2026-09-12', modalidade: 'PIX' }], [{ ...bank(10, null), data: '2026-09-14', modalidade: 'PIX', origem: 'Sicredi' }], []);

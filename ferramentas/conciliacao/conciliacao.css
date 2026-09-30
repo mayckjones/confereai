@@ -206,3 +206,4 @@
   .tool-conciliacao .brand-label{ font-size:11px; gap:5px; flex-wrap:wrap; }
   .tool-conciliacao .detail-panel .table-scroll{ max-height:650px; }
 }
+.tool-conciliacao .card-channel{display:inline-block; margin-right:4px; padding:2px 5px; border-radius:4px; background:var(--sky-bg); color:var(--sky); font-size:10px; font-weight:700; vertical-align:middle;}
