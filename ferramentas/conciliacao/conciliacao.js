@@ -59,11 +59,30 @@ function storeMeta(tx){
   if(!tx || !storeIdentity(tx)) return '';
   return '<small>' + escapeHtml(storeLabel(tx)) + '</small>' + (tx.lojaOriginal || tx.loja ? '<small>Identificada no arquivo como: ' + escapeHtml(tx.lojaOriginal || tx.loja) + '</small>' : '');
 }
+function dateMeta(tx){
+  return tx && tx.ajusteData ? '<small>' + escapeHtml(tx.ajusteData) + ' Data original: ' + escapeHtml(tx.dataOriginal) + '</small>' : '';
+}
+// O Infarma pode inverter dia/mes no bloco dos Lancamentos. Corrigir somente
+// com concordancia independente das vendas, da Cielo e do periodo desse PDF.
+// As transacoes extraidas permanecem intactas; a conciliacao recebe uma copia.
+function normalizeLaunchDates(caixa, cielo, launches){
+  var saleDates = new Set(caixa.map(function(tx){ return tx.data; }));
+  var bankDates = new Set(cielo.map(function(tx){ return tx.data; }));
+  if(saleDates.size !== 1 || bankDates.size !== 1) return launches;
+  var target = Array.from(saleDates)[0];
+  if(!bankDates.has(target)) return launches;
+  return launches.map(function(tx){
+    if(tx.data === target || !tx.data) return tx;
+    var parts = tx.data.split('-'), swapped = [parts[0], parts[2], parts[1]].join('-');
+    if(swapped !== target || tx.periodoInicio !== target || tx.periodoFim !== target) return tx;
+    return Object.assign({}, tx, { data: target, dataOriginal: tx.dataOriginal || formatDateBR(tx.data), ajusteData: 'Dia e mês invertidos no Infarma; data confirmada pela Relação, Cielo e período dos Lançamentos.' });
+  });
+}
 function appendStoreAudit(wb){
   var rows = [];
   Object.keys(state.parsed).forEach(function(source){
     state.parsed[source].forEach(function(tx){
-      rows.push({ 'Relatorio': source, 'Loja canonica': storeIdentity(tx), 'Loja atual': storeLabel(tx), 'Loja original': tx.lojaOriginal || tx.loja || '', 'Estabelecimento': tx.estabelecimento || '', 'Registro': tx.registro || tx.documento || '', 'Linha original': tx.raw || '' });
+      rows.push({ 'Relatorio': source, 'Loja canonica': storeIdentity(tx), 'Loja atual': storeLabel(tx), 'Loja original': tx.lojaOriginal || tx.loja || '', 'Estabelecimento': tx.estabelecimento || '', 'Registro': tx.registro || tx.documento || '', 'Data conciliada': tx.data || '', 'Data original': tx.dataOriginal || '', 'Periodo original': tx.periodoOriginal || '', 'Ajuste de data': tx.ajusteData || '', 'Linha original': tx.raw || '' });
     });
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Origem das lojas');
@@ -130,24 +149,28 @@ function responsibilityMeta(tx){
 // Cada parcela permanece na origem; apenas a visão por venda é consolidada.
 function parseCardLaunchLines(lines){
   var data = null, loja = '', lojaOriginal = '', out = [];
+  var dataOriginal = '', periodoOriginal = '', periodoInicio = null, periodoFim = null;
   var money = '([\\d.]+,\\d{2})';
   var rowRe = new RegExp('^(?:(\\d{2}/\\d{2}/\\d{4})\\s+)?(\\d+\\s*-\\s*.+?)\\s+(\\d+)\\s+(\\d+)\\s+' + money + '\\s+' + money + '\\s+' + money + '(?:\\s+(\\d+))?$');
   lines.forEach(function(line){
+    var period = normalizeText(line).match(/PERIODO:\s*(\d{2}\/\d{2}\/\d{4})\s+A\s+(\d{2}\/\d{2}\/\d{4})/);
+    if(period){ periodoOriginal = line; periodoInicio = parseDateAny(period[1]); periodoFim = parseDateAny(period[2]); }
     var store = line.match(/(?:Loja:\s*)?(\d+)\s*-\s*LOJA\b/i);
     if(store){ loja = store[1]; lojaOriginal = line.slice(store.index).replace(/^Loja:\s*/i, ''); }
-    if(/^\d{2}\/\d{2}\/\d{4}$/.test(line.trim())) data = parseDateAny(line);
+    if(/^\d{2}\/\d{2}\/\d{4}$/.test(line.trim())){ data = parseDateAny(line); dataOriginal = line; }
     var match = line.match(rowRe);
     if(!match) return;
     var date = match[1] ? parseDateAny(match[1]) : data;
     if(!date) throw new Error('Lançamento de cartão sem data: confira o layout do PDF.');
     data = date;
+    if(match[1]) dataOriginal = match[1];
     var description = match[2], code = (description.match(/^(\d+)\s*-/) || [])[1] || '';
     var normalized = normalizeText(description).replace(/^\d+\s*-\s*/, '').replace(/\s*-\s*/g, ' - ');
     var canal = (normalized.match(/^(POS|TEF)\b/) || [])[1] || '';
     var modalidade = detectModalidadeFromText(description);
     if(/^(MASTERCARD|VISA)$/.test(normalized)) modalidade = 'Credito';
     var faixaParcelas = /\b2X\s*-\s*3X\b/.test(normalized) ? [2, 3] : /\b1X\b/.test(normalized) ? [1] : null;
-    out.push({ origem: 'Lançamentos', data: date, loja: loja, lojaOriginal: lojaOriginal, lojaCanonica: normalizarLoja(loja), registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, canal: canal, codigoCartao: code, faixaParcelas: faixaParcelas, cadastroValido: !canal || CARD_CATALOG[code] === normalized, descricao: description, raw: line });
+    out.push({ origem: 'Lançamentos', data: date, dataOriginal: dataOriginal, periodoOriginal: periodoOriginal, periodoInicio: periodoInicio, periodoFim: periodoFim, loja: loja, lojaOriginal: lojaOriginal, lojaCanonica: normalizarLoja(loja), registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, canal: canal, codigoCartao: code, faixaParcelas: faixaParcelas, cadastroValido: !canal || CARD_CATALOG[code] === normalized, descricao: description, raw: line });
   });
   var declared = lines.map(function(line){ return line.match(/Total Geral[\s.]*:\s*(\d+)\s+([\d.]+,\d{2})/i); }).find(Boolean);
   if(!out.length) throw new Error('Nenhum lançamento de cartão reconhecido. Confira o relatório e o período.');
@@ -339,6 +362,8 @@ function parseCaixaLines(lines){
   var pendente = '';
   lines.forEach(function(originalLine){
     var line = originalLine;
+    // Cabecalhos repetidos nao sao transacoes nem continuacoes de pagamento.
+    if(/PERIODO:|EMISSAO:|PAGINA\s*:/i.test(normalizeText(line))) return;
     var store = line.match(/^(\d+)\s*-\s*LOJA\b/i);
     if(store){ loja = store[1]; lojaOriginal = originalLine; return; }
     if(dateRe.test(line)){
@@ -685,6 +710,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
 }
 
 function buildCardAudit(caixa, launchLines, cielo, pairs){
+  launchLines = normalizeLaunchDates(caixa, cielo, launchLines);
   var groups = aggregateCardLaunches(launchLines), used = new Set(), rows = [];
   caixa.forEach(function(sale){
     var internal = groups.filter(function(g){ return g.registro === sale.registro && g.data === sale.data && sameStore(g, sale); });
@@ -735,6 +761,7 @@ function cardRangeWarning(row){
 }
 
 function buildStoreRuns(caixaTx, cieloTx, launchTx){
+  launchTx = normalizeLaunchDates(caixaTx, cieloTx, launchTx);
   var storeIds = Array.from(new Set(caixaTx.map(function(tx){ return storeIdentity(tx); }))).filter(function(id){ return id !== '2'; });
   if(!storeIds.length) throw new Error('A Relação enviada contém apenas a loja 2, que não participa desta conciliação Cielo.');
   launchTx.forEach(function(tx){
@@ -753,7 +780,7 @@ function buildStoreRuns(caixaTx, cieloTx, launchTx){
     if(!storeIds.includes(id)) throw new Error('O relatório Cielo da ' + STORE_CONFIG[id].label + ' não tem vendas na Relação enviada.');
   });
   var dates = new Set(caixaTx.concat(cieloTx, launchTx).map(function(tx){ return tx.data; }));
-  if(dates.size !== 1) throw new Error('Os relatórios de várias lojas precisam ser da mesma data. Confira os períodos enviados.');
+  if(dates.size !== 1) throw new Error('As datas das transações dos relatórios não coincidem. Relação: ' + Array.from(new Set(caixaTx.map(function(tx){ return tx.data; }))).map(formatDateBR).join(', ') + '; Cielo: ' + Array.from(new Set(cieloTx.map(function(tx){ return tx.data; }))).map(formatDateBR).join(', ') + '; Lançamentos: ' + (Array.from(new Set(launchTx.map(function(tx){ return tx.data; }))).map(formatDateBR).join(', ') || 'não enviados') + '. Confira as datas das vendas, além do período do cabeçalho.');
   return storeIds.sort(function(a,b){ return storeOrder.indexOf(a) - storeOrder.indexOf(b); }).map(function(id){
     var config = STORE_CONFIG[id];
     if(!config) throw new Error('A loja ' + id + ' da Relação ainda não tem um estabelecimento Cielo configurado.');
@@ -949,6 +976,7 @@ document.getElementById('btnProcess').addEventListener('click', async function()
     }
 
     showOverlay('Cruzando transações…');
+    launchTx = normalizeLaunchDates(caixaTx, cieloTx, launchTx);
     var storeCount = new Set(caixaTx.map(function(tx){ return storeIdentity(tx); })).size;
     if(cieloTx.length && storeCount > 1){
       state.storeRuns = buildStoreRuns(caixaTx, cieloTx, launchTx);
@@ -1232,7 +1260,7 @@ function renderCardRows(){
   }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
     var tx = r.sale || r.launch || r.bank;
-    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>' + storeMeta(r.sale) + 'Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>' + (r.launch ? r.launch.linhas.map(storeMeta).join('') : '') + 'Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>' + storeMeta(r.sale) + 'Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>' + (r.launch ? r.launch.linhas.map(function(l){ return storeMeta(l) + dateMeta(l); }).join('') : '') + 'Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
   }).join('');
   document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
   document.getElementById('cardEmpty').hidden = rows.length > 0;

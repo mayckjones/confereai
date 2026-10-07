@@ -10,12 +10,61 @@ function loadEngine(extra = {}){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, normalizeLaunchDates, dateMeta, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
 
 const engine = loadEngine();
+
+test('período invertido e emissão em cabeçalhos repetidos não mudam a data das vendas', () => {
+  const header = ['Emissao: 07/10/2026', '** Período: 10/06/26 a 10/06/26 ** Forma Pagto.: CARTÃO MAGNÉTICO'];
+  const rows = ['1427 Bal 342150 06/10/2026 10:00 3/ 1 53 0,0% Cartao Mag 10,00', '1428 Bal 342151 06/10/2026 11:00 3/ 1 53 0,0% Cartao Mag 20,00'];
+  const sales = engine.parseCaixaLines([...header, '1-LOJA 1', rows[0], ...header, rows[1], 'Total Geral...: 30,00']);
+  assert.equal(sales.length, 2);
+  assert.ok(sales.every(tx => tx.data === '2026-10-06'));
+  assert.deepEqual(Array.from(sales, tx => tx.raw), rows);
+});
+
+test('inversão do Infarma é corrigida na cópia para conciliação com evidências concordantes', () => {
+  const period = 'Periodo: 06/10/2026 a 06/10/2026 ** Loja: <Todas>';
+  const raw = '1 - MASTERCARD 1427 1 10,00 0,00 10,00 000123';
+  const launches = engine.parseCardLaunchLines([period, '1-LOJA 1', '10/06/2026', raw]);
+  const sales = [{ ...sale(10, '10:00'), data: '2026-10-06', loja: '1' }];
+  const banks = [{ ...bank(10, '10:00'), data: '2026-10-06', parcelas: 1, estabelecimento: '1029024402' }];
+  const before = JSON.stringify(launches);
+  const normalized = engine.normalizeLaunchDates(sales, banks, launches);
+  assert.equal(normalized[0].data, '2026-10-06');
+  assert.equal(normalized[0].dataOriginal, '10/06/2026');
+  assert.equal(normalized[0].periodoOriginal, period);
+  assert.equal(normalized[0].raw, raw);
+  assert.match(engine.dateMeta(normalized[0]), /10\/06\/2026/);
+  const [run] = engine.buildStoreRuns(sales, banks, launches);
+  assert.equal(run.cardAudit.rows[0].issues.length, 0);
+  assert.equal(run.divergences.length, 0);
+  assert.equal(run.parsed.lancamentos[0].data, '2026-10-06');
+  const audit = engine.buildCardAudit(sales, launches, banks, engine.matchCardTransactions(sales, banks));
+  assert.equal(audit.rows[0].internalOK, true);
+  assert.equal(JSON.stringify(launches), before);
+  assert.equal(engine.normalizeLaunchDates(sales, banks, normalized)[0], normalized[0]);
+});
+
+test('datas realmente distintas, ou sem confirmação independente, continuam bloqueadas', () => {
+  const launches = engine.parseCardLaunchLines(['Periodo: 06/10/2026 a 06/10/2026 ** Loja: 1-LOJA 1', '10/06/2026', '1 - MASTERCARD 1427 1 10,00 0,00 10,00 000123']);
+  const sales = [{ ...sale(10, '10:00'), data: '2026-10-06', loja: '1' }];
+  const banks = [{ ...bank(10, '10:00'), data: '2026-10-06', estabelecimento: '1029024402' }];
+  for(const altered of [
+    { ...launches[0], data: '2026-10-05' },
+    { ...launches[0], periodoInicio: '2026-06-10', periodoFim: '2026-06-10' },
+    { ...launches[0], periodoInicio: null, periodoFim: null }
+  ]){
+    assert.equal(engine.normalizeLaunchDates(sales, banks, [altered])[0], altered);
+    assert.throws(() => engine.buildStoreRuns(sales, banks, [altered]), /Relação: 06\/10\/2026; Cielo: 06\/10\/2026; Lançamentos:/);
+  }
+  assert.equal(engine.normalizeLaunchDates(sales, [{ ...banks[0], data: '2026-10-05' }], launches)[0], launches[0]);
+  assert.equal(engine.normalizeLaunchDates(sales, [], launches)[0], launches[0]);
+  assert.equal(engine.normalizeLaunchDates([...sales, { ...sales[0], data: '2026-10-05' }], banks, launches)[0], launches[0]);
+});
 
 test('normalização usa apenas os aliases cadastrados e preserva lojas desconhecidas', () => {
   for(const alias of ['4', 'LOJA 4', '7', 'LOJA 7', 'LOJA 7 MEG 4', 'MEG 4', '4 - LOJA 4 GONC 1', '7 - LOJA 7 MEG 4', 'LOJA_MEG_4']){
