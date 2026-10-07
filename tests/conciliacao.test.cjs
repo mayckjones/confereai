@@ -5,17 +5,133 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 
-function loadEngine(){
-  const context = vm.createContext({ window: {}, pdfjsLib: { GlobalWorkerOptions: {} }, console });
+function loadEngine(extra = {}){
+  const context = vm.createContext({ window: {}, pdfjsLib: { GlobalWorkerOptions: {} }, console, ...extra });
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
 
 const engine = loadEngine();
+
+test('normalização usa apenas os aliases cadastrados e preserva lojas desconhecidas', () => {
+  for(const alias of ['4', 'LOJA 4', '7', 'LOJA 7', 'LOJA 7 MEG 4', 'MEG 4', '4 - LOJA 4 GONC 1', '7 - LOJA 7 MEG 4', 'LOJA_MEG_4']){
+    assert.equal(engine.normalizarLoja(alias), 'LOJA_MEG_4');
+  }
+  for(const alias of ['5', 'LOJA 5', '6', 'LOJA 6', 'LOJA 6 MEG 5', 'MEG 5', '5 - LOJA 5 GONC 2', '6 - LOJA 6 MEG 5']){
+    assert.equal(engine.normalizarLoja(alias), 'LOJA_MEG_5');
+  }
+  for(const code of ['1', '2', '3', '8', '17']){
+    assert.equal(engine.normalizarLoja(code), code);
+    assert.equal(engine.normalizarLoja(`${code} - LOJA ${code}`), code);
+  }
+  for(const name of ['Filial sem cadastro', 'LOJA 8', 'MEG 14', 'LOJA 74', 'LOJA 4 OUTRA']){
+    assert.equal(engine.normalizarLoja(name), name);
+  }
+  assert.equal(engine.normalizarLoja('  loja 7 meg 4  '), 'LOJA_MEG_4');
+});
+
+test('aliases conciliam Lançamentos, Relação e Cielo nos dois sentidos sem alterar a origem', () => {
+  for(const [oldCode, currentCode, suffix, establishment, canonical] of [
+    ['4', '7', 'MEG 4', '3002105343', 'LOJA_MEG_4'],
+    ['5', '6', 'MEG 5', '2800327299', 'LOJA_MEG_5']
+  ]){
+    for(const reverse of [false, true]){
+      const headers = [`${oldCode} - LOJA ${oldCode} GONC ${oldCode === '4' ? '1' : '2'}`, `${currentCode} - LOJA ${currentCode} ${suffix}`];
+      const launchHeader = headers[reverse ? 1 : 0], saleHeader = headers[reverse ? 0 : 1];
+      const launchRow = '1 - MASTERCARD 1427 1 10,00 0,00 10,00 000123';
+      const saleRow = '1427 Bal 342150 09/09/2026 10:00 3/ 1 53 0,0% Cartao Mag 10,00';
+      const launches = engine.parseCardLaunchLines([`Periodo: 09/09/2026 a 09/09/2026 ** Loja: ${launchHeader}`, '09/09/2026', launchRow]);
+      const sales = engine.parseCaixaLines([saleHeader, saleRow]);
+      const banks = [{ ...bank(10, '10:00'), parcelas: 1, estabelecimento: establishment }];
+      const before = JSON.stringify({ launches, sales, banks });
+      const [run] = engine.buildStoreRuns(sales, banks, launches);
+      assert.equal(run.store, canonical);
+      assert.equal(run.cardAudit.rows.length, 1);
+      assert.equal(run.cardAudit.rows[0].internalOK, true);
+      assert.equal(run.cardAudit.rows[0].issues.length, 0);
+      assert.equal(run.divergences.length, 0);
+      assert.equal(run.summary[0].caixa, 10);
+      assert.equal(run.summary[0].banco, 10);
+      assert.equal(sales[0].lojaOriginal, saleHeader);
+      assert.equal(launches[0].lojaOriginal, launchHeader);
+      assert.equal(sales[0].raw, saleRow);
+      assert.equal(launches[0].raw, launchRow);
+      assert.equal(sales[0].lojaCanonica, canonical);
+      assert.equal(launches[0].lojaCanonica, canonical);
+      assert.equal(JSON.stringify({ launches, sales, banks }), before);
+      assert.match(engine.storeMeta(sales[0]), /Identificada no arquivo como:/);
+      assert.ok(engine.storeMeta(sales[0]).includes(saleHeader));
+    }
+  }
+});
+
+test('agrupamentos e registros repetidos usam identidade canônica sem misturar outras lojas', () => {
+  const lines = engine.parseCardLaunchLines(launchFixture);
+  assert.equal(engine.aggregateCardLaunches([lines[0], { ...lines[1], loja: '4' }]).length, 1);
+  const a = sale(184.95, '08:49');
+  const duplicate = { ...a, loja: '4' };
+  const audit = engine.buildCardAudit([a, duplicate], lines, [], { matched: [], divergValor: [], sobras: [] });
+  assert.ok(audit.rows[0].issues.includes('Registro repetido na Relação'));
+  assert.equal(engine.aggregateCardLaunches([lines[0], { ...lines[1], loja: '3' }]).length, 2);
+});
+
+test('mesmos valores e horários de unidades diferentes não cruzam na Cielo', () => {
+  const sales = [{ ...sale(10, '10:00'), loja: '4' }, { ...sale(10, '10:00'), loja: '5' }];
+  const banks = [{ ...bank(10, '10:00'), estabelecimento: '2800327299' }, { ...bank(10, '10:00'), estabelecimento: '3002105343' }];
+  const result = engine.matchCardTransactions(sales, banks);
+  assert.equal(result.matched.length, 2);
+  assert.equal(result.matched.find(pair => pair.caixa === sales[0]).banco, banks[1]);
+  assert.equal(result.matched.find(pair => pair.caixa === sales[1]).banco, banks[0]);
+  assert.equal(engine.matchCardTransactions([sales[0]], [banks[0]]).matched.length, 0);
+});
+
+test('códigos antigos e atuais na mesma Relação geram uma aba e total por unidade', () => {
+  const sales = ['4', '7', '5', '6', '1', '3'].map((loja, i) => ({ ...sale(10, '10:00', String(i)), loja }));
+  const establishments = ['3002105343', '3002105343', '2800327299', '2800327299', '1029024402', '1040788502'];
+  const banks = sales.map((tx, i) => ({ ...bank(10, '10:00'), estabelecimento: establishments[i], hora: `10:0${i}` }));
+  sales.forEach((tx, i) => { tx.hora = banks[i].hora; });
+  const runs = engine.buildStoreRuns(sales, banks, []);
+  assert.equal(runs.length, 4);
+  assert.deepEqual(Array.from(runs, run => run.store), ['1', '3', 'LOJA_MEG_4', 'LOJA_MEG_5']);
+  for(const id of ['LOJA_MEG_4', 'LOJA_MEG_5']){
+    const run = runs.find(run => run.store === id);
+    assert.equal(run.parsed.caixa.length, 2);
+    assert.equal(run.summary[0].caixa, 20);
+    assert.equal(run.summary[0].banco, 20);
+    assert.equal(run.divergences.length, 0);
+  }
+});
+
+test('loja desconhecida permanece conciliável pelo código original', () => {
+  const sales = [{ ...sale(10, '10:00'), loja: '8' }];
+  const launches = engine.parseCardLaunchLines(['8 - LOJA 8', '09/09/2026', '1 - MASTERCARD 1427 1 10,00 0,00 10,00 000123']);
+  const banks = [{ ...bank(10, '10:00'), parcelas: 1 }];
+  const result = engine.reconcile(sales, [], banks);
+  const audit = engine.buildCardAudit(sales, launches, banks, result.pairs);
+  assert.equal(result.divergences.length, 0);
+  assert.equal(audit.rows[0].internalOK, true);
+  assert.equal(audit.rows[0].issues.length, 0);
+  assert.equal(launches[0].loja, '8');
+  assert.equal(launches[0].lojaCanonica, '8');
+});
+
+test('Excel inclui a identidade canônica, o nome atual e os identificadores originais', () => {
+  const sheets = [];
+  const exported = loadEngine({ XLSX: { utils: { json_to_sheet: rows => rows, book_append_sheet: (wb, rows, name) => sheets.push({ rows, name }) } } });
+  const tx = { loja: '4', lojaOriginal: '4 - LOJA 4 GONC 1', raw: 'linha original', registro: '123' };
+  exported.state.parsed.caixa = [tx];
+  exported.appendStoreAudit({});
+  assert.equal(sheets[0].name, 'Origem das lojas');
+  assert.equal(sheets[0].rows[0]['Loja canonica'], 'LOJA_MEG_4');
+  assert.equal(sheets[0].rows[0]['Loja atual'], 'Loja 7 MEG 4');
+  assert.equal(sheets[0].rows[0]['Loja original'], tx.lojaOriginal);
+  assert.equal(sheets[0].rows[0]['Linha original'], tx.raw);
+  assert.equal(tx.loja, '4');
+});
 const sale = (valor, hora, registro = '1427') => ({ valor, hora, data: '2026-09-09', registro, documento: registro, loja: '7', modalidade: 'Cartao' });
 const bank = (valor, hora) => ({ valor, hora, data: '2026-09-09', modalidade: 'Credito', bandeira: 'Mastercard', parcelas: 2, origem: 'Cielo' });
 const launchFixture = [
@@ -115,7 +231,7 @@ test('quatro extratos Cielo geram quatro lojas isoladas e excluem a loja 2', () 
   });
   const launches = [{ ...engine.parseCardLaunchLines(launchFixture)[0], loja: '1', registro: '1', parcelas: 1 }];
   const runs = engine.buildStoreRuns(sales, cielo, launches);
-  assert.deepEqual(Array.from(runs, run => run.label), ['Loja 1', 'Loja 3', 'Loja 4', 'Loja 5']);
+  assert.deepEqual(Array.from(runs, run => run.label), ['Loja 1', 'Loja 3', 'Loja 7 MEG 4', 'Loja 6 MEG 5']);
   assert.equal(runs.reduce((sum, run) => sum + run.parsed.caixa.length, 0), 4);
   assert.ok(runs.every(run => run.divergences.length === 0));
   assert.ok(runs.every(run => run.cardAudit));

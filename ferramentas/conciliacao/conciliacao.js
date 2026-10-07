@@ -29,9 +29,45 @@ var state = {
 var STORE_CONFIG = {
   '1': { label: 'Loja 1', establishment: '1029024402' },
   '3': { label: 'Loja 3', establishment: '1040788502' },
-  '7': { label: 'Loja 4', establishment: '3002105343' },
-  '6': { label: 'Loja 5', establishment: '2800327299' }
+  'LOJA_MEG_4': { label: 'Loja 7 MEG 4', establishment: '3002105343', aliases: ['4', 'LOJA 4', '7', 'LOJA 7', 'LOJA 7 MEG 4', 'MEG 4'] },
+  'LOJA_MEG_5': { label: 'Loja 6 MEG 5', establishment: '2800327299', aliases: ['5', 'LOJA 5', '6', 'LOJA 6', 'LOJA 6 MEG 5', 'MEG 5'] }
 };
+
+// Somente aliases cadastrados convergem; lojas desconhecidas preservam o codigo.
+function normalizarLoja(value){
+  var text = normalizeText(value), code = text.match(/^(\d+)\s*-\s*LOJA\b/);
+  var alias = code ? code[1] : text;
+  var id = Object.keys(STORE_CONFIG).find(function(key){
+    return key === alias || (STORE_CONFIG[key].aliases || []).includes(alias);
+  });
+  return id || (code ? code[1] : String(value == null ? '' : value));
+}
+function storeIdentity(tx){
+  if(tx.loja) return normalizarLoja(tx.loja);
+  return Object.keys(STORE_CONFIG).find(function(id){ return STORE_CONFIG[id].establishment === tx.estabelecimento; }) || '';
+}
+function sameStore(a, b){ return storeIdentity(a) === storeIdentity(b); }
+function compatibleStores(a, b){
+  var left = storeIdentity(a), right = storeIdentity(b);
+  return !left || !right || left === right;
+}
+function storeLabel(tx){
+  var id = storeIdentity(tx);
+  return STORE_CONFIG[id] ? STORE_CONFIG[id].label : (tx.lojaOriginal || tx.loja || '');
+}
+function storeMeta(tx){
+  if(!tx || !storeIdentity(tx)) return '';
+  return '<small>' + escapeHtml(storeLabel(tx)) + '</small>' + (tx.lojaOriginal || tx.loja ? '<small>Identificada no arquivo como: ' + escapeHtml(tx.lojaOriginal || tx.loja) + '</small>' : '');
+}
+function appendStoreAudit(wb){
+  var rows = [];
+  Object.keys(state.parsed).forEach(function(source){
+    state.parsed[source].forEach(function(tx){
+      rows.push({ 'Relatorio': source, 'Loja canonica': storeIdentity(tx), 'Loja atual': storeLabel(tx), 'Loja original': tx.lojaOriginal || tx.loja || '', 'Estabelecimento': tx.estabelecimento || '', 'Registro': tx.registro || tx.documento || '', 'Linha original': tx.raw || '' });
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Origem das lojas');
+}
 
 // Cadastro de Cartões Magnéticos fornecido pelo sistema (código -> descrição).
 // A coluna Parc. no relatório é a quantidade efetiva de parcelas; o sufixo
@@ -93,12 +129,12 @@ function responsibilityMeta(tx){
 
 // Cada parcela permanece na origem; apenas a visão por venda é consolidada.
 function parseCardLaunchLines(lines){
-  var data = null, loja = '', out = [];
+  var data = null, loja = '', lojaOriginal = '', out = [];
   var money = '([\\d.]+,\\d{2})';
   var rowRe = new RegExp('^(?:(\\d{2}/\\d{2}/\\d{4})\\s+)?(\\d+\\s*-\\s*.+?)\\s+(\\d+)\\s+(\\d+)\\s+' + money + '\\s+' + money + '\\s+' + money + '(?:\\s+(\\d+))?$');
   lines.forEach(function(line){
     var store = line.match(/(?:Loja:\s*)?(\d+)\s*-\s*LOJA\b/i);
-    if(store) loja = store[1];
+    if(store){ loja = store[1]; lojaOriginal = line.slice(store.index).replace(/^Loja:\s*/i, ''); }
     if(/^\d{2}\/\d{2}\/\d{4}$/.test(line.trim())) data = parseDateAny(line);
     var match = line.match(rowRe);
     if(!match) return;
@@ -111,7 +147,7 @@ function parseCardLaunchLines(lines){
     var modalidade = detectModalidadeFromText(description);
     if(/^(MASTERCARD|VISA)$/.test(normalized)) modalidade = 'Credito';
     var faixaParcelas = /\b2X\s*-\s*3X\b/.test(normalized) ? [2, 3] : /\b1X\b/.test(normalized) ? [1] : null;
-    out.push({ origem: 'Lançamentos', data: date, loja: loja, registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, canal: canal, codigoCartao: code, faixaParcelas: faixaParcelas, cadastroValido: !canal || CARD_CATALOG[code] === normalized, descricao: description, raw: line });
+    out.push({ origem: 'Lançamentos', data: date, loja: loja, lojaOriginal: lojaOriginal, lojaCanonica: normalizarLoja(loja), registro: match[3], documento: match[3], parcelas: Number(match[4]), valor: parseValorBR(match[5]), taxa: parseValorBR(match[6]), valorLiquido: parseValorBR(match[7]), nsu: match[8] || '', bandeira: detectBrand(description), modalidade: modalidade, canal: canal, codigoCartao: code, faixaParcelas: faixaParcelas, cadastroValido: !canal || CARD_CATALOG[code] === normalized, descricao: description, raw: line });
   });
   var declared = lines.map(function(line){ return line.match(/Total Geral[\s.]*:\s*(\d+)\s+([\d.]+,\d{2})/i); }).find(Boolean);
   if(!out.length) throw new Error('Nenhum lançamento de cartão reconhecido. Confira o relatório e o período.');
@@ -122,7 +158,7 @@ function parseCardLaunchLines(lines){
 function aggregateCardLaunches(lines){
   var groups = new Map();
   lines.forEach(function(line){
-    var key = [line.loja, line.data, line.registro, line.nsu, normalizeText(line.descricao)].join('|');
+    var key = [storeIdentity(line), line.data, line.registro, line.nsu, normalizeText(line.descricao)].join('|');
     if(!groups.has(key)) groups.set(key, Object.assign({}, line, { linhas: [], valor: 0, valorLiquido: 0 }));
     var group = groups.get(key);
     group.linhas.push(line);
@@ -226,7 +262,7 @@ function parseCaixaLines(lines){
   var lastCaixa = '';
   var lastTurno = '';
   var lastVendedor = '';
-  var loja = '';
+  var loja = '', lojaOriginal = '';
 
   function readLine(line, isExtra){
     isExtra = isExtra || false;
@@ -288,6 +324,8 @@ function parseCaixaLines(lines){
       documento: documento,
       registro: documento,
       loja: loja,
+      lojaOriginal: lojaOriginal,
+      lojaCanonica: normalizarLoja(loja),
       caixa: caixa,
       turno: turno,
       caixaTurno: caixa && turno ? caixa + '/' + turno : '',
@@ -302,7 +340,7 @@ function parseCaixaLines(lines){
   lines.forEach(function(originalLine){
     var line = originalLine;
     var store = line.match(/^(\d+)\s*-\s*LOJA\b/i);
-    if(store){ loja = store[1]; return; }
+    if(store){ loja = store[1]; lojaOriginal = originalLine; return; }
     if(dateRe.test(line)){
       if(pendente) readLine(pendente);
       var re = new RegExp(valorRe.source, 'g');
@@ -566,7 +604,7 @@ function matchCardTransactions(caixaList, bankList){
       changed = false;
       function candidates(c){
         return right.map(function(b){
-          if(c.data !== b.data || (requireValue && cents(c.valor) !== cents(b.valor))) return null;
+          if(!compatibleStores(c, b) || c.data !== b.data || (requireValue && cents(c.valor) !== cents(b.valor))) return null;
           var distance = c.hora && b.hora ? timeDiffMinutes(c.hora, b.hora) : Infinity;
           if(!requireValue && distance > 2) return null;
           return { caixa: c, banco: b, distance: distance };
@@ -577,7 +615,7 @@ function matchCardTransactions(caixaList, bankList){
         if(!choices.length || (choices.length > 1 && choices[0].distance === choices[1].distance)) continue;
         var choice = choices[0];
         var competitors = left.filter(function(c){
-          return c !== choice.caixa && c.data === choice.banco.data && (!requireValue || cents(c.valor) === cents(choice.banco.valor)) && ((!c.hora || !choice.banco.hora) ? Infinity : timeDiffMinutes(c.hora, choice.banco.hora)) <= choice.distance;
+          return c !== choice.caixa && compatibleStores(c, choice.banco) && c.data === choice.banco.data && (!requireValue || cents(c.valor) === cents(choice.banco.valor)) && ((!c.hora || !choice.banco.hora) ? Infinity : timeDiffMinutes(c.hora, choice.banco.hora)) <= choice.distance;
         });
         if(competitors.length) continue;
         // Horários distantes não confirmam identidade, mesmo com valor único.
@@ -603,6 +641,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
     if(tipo === 'valor_divergente'){
       divergences.push({
         tipo: tipo, modalidade: modalidadeLabel,
+        loja: (item.caixa || item).loja, lojaOriginal: (item.caixa || item).lojaOriginal, estabelecimento: (item.banco || item).estabelecimento,
         data: item.caixa.data, hora: item.caixa.hora || item.banco.hora || '—',
         documento: item.caixa.documento || '—',
         caixaTurno: item.caixa.caixaTurno || '', codigoVendedor: item.caixa.codigoVendedor || '',
@@ -612,6 +651,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
     } else if(tipo === 'ausente_banco'){
       divergences.push({
         tipo: tipo, modalidade: modalidadeLabel,
+        loja: (item.caixa || item).loja, lojaOriginal: (item.caixa || item).lojaOriginal, estabelecimento: (item.banco || item).estabelecimento,
         data: item.data, hora: item.hora || '—',
         documento: item.documento || '—',
         caixaTurno: item.caixaTurno || '', codigoVendedor: item.codigoVendedor || '',
@@ -620,6 +660,7 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
     } else if(tipo === 'sobra_banco'){
       divergences.push({
         tipo: tipo, modalidade: modalidadeLabel,
+        loja: (item.caixa || item).loja, lojaOriginal: (item.caixa || item).lojaOriginal, estabelecimento: (item.banco || item).estabelecimento,
         data: item.data, hora: item.hora || '—',
         documento: item.documento || '—',
         caixaTurno: '', codigoVendedor: '',
@@ -646,10 +687,10 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
 function buildCardAudit(caixa, launchLines, cielo, pairs){
   var groups = aggregateCardLaunches(launchLines), used = new Set(), rows = [];
   caixa.forEach(function(sale){
-    var internal = groups.filter(function(g){ return g.registro === sale.registro && g.data === sale.data && g.loja === sale.loja; });
+    var internal = groups.filter(function(g){ return g.registro === sale.registro && g.data === sale.data && sameStore(g, sale); });
     var pair = pairs.matched.concat(pairs.divergValor).find(function(p){ return p.caixa === sale; });
     var issues = [], launch = internal.length === 1 ? internal[0] : null;
-    if(caixa.filter(function(other){ return other.data === sale.data && other.loja === sale.loja && other.registro === sale.registro; }).length > 1) issues.push('Registro repetido na Relação');
+    if(caixa.filter(function(other){ return other.data === sale.data && sameStore(other, sale) && other.registro === sale.registro; }).length > 1) issues.push('Registro repetido na Relação');
     internal.forEach(function(g){ used.add(g); });
     if(internal.length === 0) issues.push('Sem lançamento interno');
     if(internal.length > 1) issues.push('Mais de um lançamento para o registro');
@@ -694,10 +735,10 @@ function cardRangeWarning(row){
 }
 
 function buildStoreRuns(caixaTx, cieloTx, launchTx){
-  var storeIds = Array.from(new Set(caixaTx.map(function(tx){ return tx.loja; }))).filter(function(id){ return id !== '2'; });
+  var storeIds = Array.from(new Set(caixaTx.map(function(tx){ return storeIdentity(tx); }))).filter(function(id){ return id !== '2'; });
   if(!storeIds.length) throw new Error('A Relação enviada contém apenas a loja 2, que não participa desta conciliação Cielo.');
   launchTx.forEach(function(tx){
-    if(tx.loja !== '2' && !storeIds.includes(tx.loja)) throw new Error('Há Lançamentos da loja ' + tx.loja + ' sem vendas correspondentes na Relação.');
+    if(storeIdentity(tx) !== '2' && !storeIds.includes(storeIdentity(tx))) throw new Error('Há Lançamentos da loja ' + tx.loja + ' sem vendas correspondentes na Relação.');
   });
   var byEstablishment = new Map();
   cieloTx.forEach(function(tx){
@@ -705,7 +746,7 @@ function buildStoreRuns(caixaTx, cieloTx, launchTx){
     if(!byEstablishment.has(tx.estabelecimento)) byEstablishment.set(tx.estabelecimento, []);
     byEstablishment.get(tx.estabelecimento).push(tx);
   });
-  var storeOrder = ['1', '3', '7', '6'];
+  var storeOrder = Object.keys(STORE_CONFIG);
   byEstablishment.forEach(function(_, establishment){
     var id = storeOrder.find(function(key){ return STORE_CONFIG[key].establishment === establishment; });
     if(!id) throw new Error('Estabelecimento Cielo ' + establishment + ' não está vinculado a uma loja do sistema. Confira os arquivos.');
@@ -718,8 +759,8 @@ function buildStoreRuns(caixaTx, cieloTx, launchTx){
     if(!config) throw new Error('A loja ' + id + ' da Relação ainda não tem um estabelecimento Cielo configurado.');
     var bank = byEstablishment.get(config.establishment);
     if(!bank || !bank.length) throw new Error('Falta o relatório Cielo da ' + config.label + ' (estabelecimento ' + config.establishment + ').');
-    var sales = caixaTx.filter(function(tx){ return tx.loja === id; });
-    var launches = launchTx.filter(function(tx){ return tx.loja === id; });
+    var sales = caixaTx.filter(function(tx){ return storeIdentity(tx) === id; });
+    var launches = launchTx.filter(function(tx){ return storeIdentity(tx) === id; });
     var result = reconcile(sales, [], bank);
     return {
       store: id, label: config.label, parsed: { caixa: sales, sicredi: [], cielo: bank, lancamentos: launches },
@@ -908,7 +949,7 @@ document.getElementById('btnProcess').addEventListener('click', async function()
     }
 
     showOverlay('Cruzando transações…');
-    var storeCount = new Set(caixaTx.map(function(tx){ return tx.loja; })).size;
+    var storeCount = new Set(caixaTx.map(function(tx){ return storeIdentity(tx); })).size;
     if(cieloTx.length && storeCount > 1){
       state.storeRuns = buildStoreRuns(caixaTx, cieloTx, launchTx);
       state.activeStoreIndex = 0;
@@ -986,6 +1027,10 @@ function renderResults(){
   document.getElementById('mSicredi').closest('.metric-card').hidden = cielo.length > 0;
   document.getElementById('mCielo').closest('.metric-card').hidden = !cielo.length;
   document.getElementById('analysisMode').textContent = state.storeRuns.length ? 'Conferência por loja · ' + state.storeRuns[state.activeStoreIndex].label : state.cardAudit ? 'Conferência detalhada · 3 relatórios' : 'Conciliação de valores';
+  if(!state.storeRuns.length && state.parsed.caixa.length && new Set(state.parsed.caixa.map(storeIdentity)).size === 1){
+    var label = storeLabel(state.parsed.caixa[0]);
+    if(label) document.getElementById('analysisMode').textContent += ' · ' + label;
+  }
   document.getElementById('analysisScope').textContent = state.cardAudit ? 'Valores + dados dos cartões' : 'Bandeira e modalidade internas não verificadas';
   if(!cielo.length) document.getElementById('analysisScope').textContent = 'Recebimentos PIX';
   document.getElementById('tab-cards').hidden = !state.cardAudit;
@@ -1048,7 +1093,7 @@ function renderResults(){
     divEmpty.style.display = 'none';
     state.divergences.slice().sort(function(a,b){ return (a.data || '').localeCompare(b.data || ''); }).forEach(function(d){
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + badgeFor(d.tipo) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + responsibilityMeta(d) + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
+      tr.innerHTML = '<td>' + badgeFor(d.tipo) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + responsibilityMeta(d) + storeMeta(d) + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
       divBody.appendChild(tr);
     });
   }
@@ -1072,7 +1117,7 @@ function renderResults(){
     if(!t) return '<td colspan="6" class="missing-side' + dividerClass + '">— sem lançamento correspondente —</td>';
     var num = divider ? ++countB : ++countA;
     var raw = t.raw || '—';
-    return '<td class="num' + dividerClass + '" style="color:var(--gray-400);font-size:11px;text-align:center;">' + num + '</td><td class="mono" style="text-align:center;">' + (t.data ? formatDateBR(t.data) : '—') + '</td><td class="mono" style="text-align:center;">' + (t.hora || '—') + '</td><td class="mono" style="text-align:center;">' + escapeHtml(t.documento || '—') + '</td><td class="num">' + fmtBRL(t.valor) + '</td><td class="raw" title="' + escapeHtml(raw) + '">' + escapeHtml(raw) + '</td>';
+    return '<td class="num' + dividerClass + '" style="color:var(--gray-400);font-size:11px;text-align:center;">' + num + '</td><td class="mono" style="text-align:center;">' + (t.data ? formatDateBR(t.data) : '—') + '</td><td class="mono" style="text-align:center;">' + (t.hora || '—') + '</td><td class="mono" style="text-align:center;">' + escapeHtml(t.documento || '—') + '</td><td class="num">' + fmtBRL(t.valor) + '</td><td class="raw" title="' + escapeHtml(raw) + '">' + escapeHtml(raw) + storeMeta(t) + '</td>';
   }
   var alignedRows = state.pairs.matched.concat(state.pairs.divergValor).map(function(p){ return { left: p.caixa, right: p.banco, confidence: p.confidence }; });
   state.pairs.ausentes.forEach(function(t){ alignedRows.push({ left: t, right: null }); });
@@ -1187,7 +1232,7 @@ function renderCardRows(){
   }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
     var tx = r.sale || r.launch || r.bank;
-    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>' + storeMeta(r.sale) + 'Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>' + (r.launch ? r.launch.linhas.map(storeMeta).join('') : '') + 'Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + (r.confidence === 'horario' ? 'Data e horário próximo (até 2 minutos); confira os valores acima.' : 'Revisão necessária.') + '</p></details></td></tr>';
   }).join('');
   document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
   document.getElementById('cardEmpty').hidden = rows.length > 0;
@@ -1216,6 +1261,7 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   XLSX.utils.book_append_sheet(wb, ws, 'Conferência de cartões');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cardGroups().map(function(g){ return { 'Categoria': g.categoria, 'Vendas sistema': g.qtdSistema, 'Total sistema': g.sistema / 100, 'Vendas Cielo': g.qtdCielo, 'Total Cielo': g.cielo / 100, 'Diferença': (g.sistema - g.cielo) / 100 }; })), 'Totais por categoria');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildCardChannelGroups(state.cardAudit).map(function(g){ return { 'Canal sistema': g.canal, 'Vendas': g.qtd, 'Total bruto': g.total / 100 }; })), 'Totais POS TEF');
+  appendStoreAudit(wb);
   XLSX.writeFile(wb, 'conferencia_cartoes' + storeFileSuffix() + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 });
 
@@ -1264,6 +1310,7 @@ document.getElementById('btnExport').addEventListener('click', function(){
   XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
 
   var dataStr = new Date().toISOString().slice(0,10);
+  appendStoreAudit(wb);
   XLSX.writeFile(wb, 'divergencias_conciliacao' + storeFileSuffix() + '_' + dataStr + '.xlsx');
   showToast('Relatório exportado com sucesso.');
 });
@@ -1295,6 +1342,7 @@ document.getElementById('btnExportCompare').addEventListener('click', function()
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Comparativo');
   var dataStr = new Date().toISOString().slice(0,10);
+  appendStoreAudit(wb);
   XLSX.writeFile(wb, 'comparativo_linha_a_linha' + storeFileSuffix() + '_' + dataStr + '.xlsx');
   showToast('Comparativo exportado com sucesso.');
 });
