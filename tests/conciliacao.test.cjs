@@ -10,12 +10,101 @@ function loadEngine(extra = {}){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, parseCardMatrix, parseCielo, detectXlsxType, receiptMeta, cardSourceLabel, normalizeLaunchDates, dateMeta, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, parsePixMatrix, parseSicredi, normalizePixStatements, buildPixStoreRuns, matchModalidade, parseCardMatrix, parseCielo, detectXlsxType, receiptMeta, cardSourceLabel, normalizeLaunchDates, dateMeta, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
 
 const engine = loadEngine();
+
+function pixMatrix(account, rows){
+  return [['Cooperativa:', '2205'], ['Conta:', account], ['Data', 'Descrição', 'Documento', 'Valor (R$)', 'Saldo (R$)'], ...rows];
+}
+const pixRow = (value, balance = value, description = 'RECEBIMENTO PIX CLIENTE') => ['06/10/2026', description, 'PIX_CRED', value, balance];
+const pixSale = (loja, valor, registro = loja) => ({ loja, valor, registro, documento: registro, data: '2026-10-06', modalidade: 'PIX' });
+
+test('Carteira Digital vira PIX e o parser preserva os recebimentos e a conta original', () => {
+  const sales = engine.parseCaixaLines(['7-LOJA 7 MEG 4', '4780 Bal 444444 06/10/2026 11:47 3/ 1 53 0,0% Cart. Dig 10,00']);
+  assert.equal(sales[0].modalidade, 'PIX');
+  const matrix = pixMatrix('75073-5', [pixRow(10), pixRow(-10), pixRow(0), pixRow(30, 40, 'PAGAMENTO PIX CLIENTE'), pixRow(40, 80, 'CIELO CREDITO MASTER')]);
+  const before = JSON.stringify(matrix);
+  const [receipt] = engine.parsePixMatrix(matrix, 'extrato lj2.xls', 'Extrato');
+  assert.equal(receipt.valor, 10);
+  assert.equal(receipt.contaOriginal, '75073-5');
+  assert.equal(receipt.contaPix, '2205|75073-5');
+  assert.deepEqual(Array.from(receipt.lojasCanonicas), ['2', 'LOJA_MEG_4']);
+  assert.equal(receipt.linhasOriginais[0].linha, 4);
+  assert.equal(JSON.stringify(receipt.linhasOriginais[0].celulas), JSON.stringify(matrix[3]));
+  assert.equal(JSON.stringify(matrix), before);
+});
+
+test('extratos idênticos lj2/lj4 são contados uma vez e pagamentos repetidos são preservados', () => {
+  const matrix = pixMatrix('75073-5', [pixRow(10), pixRow(10)]);
+  const first = engine.parsePixMatrix(matrix, 'extrato lj2.xls', 'Extrato');
+  const second = engine.parsePixMatrix(matrix, 'extrato lj4.xls', 'Extrato');
+  const before = JSON.stringify([first, second]);
+  const unique = engine.normalizePixStatements([...first, ...second]);
+  assert.equal(unique.length, 2);
+  assert.equal(unique.reduce((sum, tx) => sum + tx.valor, 0), 20);
+  assert.ok(unique.every(tx => tx.origensPix.length === 2));
+  assert.equal(engine.normalizePixStatements(unique).length, 2);
+  assert.equal(JSON.stringify([first, second]), before);
+  const other = engine.parsePixMatrix(pixMatrix('75079-4', [pixRow(10), pixRow(10)]), 'lj3.xls', 'Extrato');
+  assert.equal(engine.normalizePixStatements([...first, ...other]).length, 4);
+});
+
+test('PIX de contas diferentes não cruzam e a conta compartilhada tem subtotais por loja', () => {
+  const receipts = [
+    ...engine.parsePixMatrix(pixMatrix('87041-2', [pixRow(10)]), 'lj1.xls', 'Extrato'),
+    ...engine.parsePixMatrix(pixMatrix('75079-4', [pixRow(10)]), 'lj3.xls', 'Extrato'),
+    ...engine.parsePixMatrix(pixMatrix('75073-5', [pixRow(20), pixRow(30)]), 'lj2.xls', 'Extrato'),
+    ...engine.parsePixMatrix(pixMatrix('83679-6', [pixRow(40)]), 'lj5.xls', 'Extrato')
+  ];
+  const sales = [pixSale('1', 10), pixSale('3', 10), pixSale('2', 20), pixSale('7', 30), pixSale('6', 40)];
+  const runs = engine.buildPixStoreRuns(sales, receipts);
+  assert.equal(runs.length, 4);
+  assert.ok(runs.every(run => run.divergences.length === 0));
+  const shared = runs.find(run => run.accountPix === '2205|75073-5');
+  assert.equal(shared.summary[0].caixa, 50);
+  assert.equal(shared.summary[0].banco, 50);
+  assert.deepEqual(Array.from(shared.summary.slice(1), row => row.caixa), [20, 30]);
+  assert.equal(engine.matchModalidade([sales[0]], [receipts[1]]).matched.length, 0);
+});
+
+test('valores PIX iguais de lojas diferentes na conta compartilhada ficam pendentes', () => {
+  const sales = [pixSale('2', 10), pixSale('4', 10)];
+  const receipts = engine.parsePixMatrix(pixMatrix('75073-5', [pixRow(10)]), 'lj2.xls', 'Extrato');
+  const [run] = engine.buildPixStoreRuns(sales, receipts);
+  assert.equal(run.pairs.matched.length, 0);
+  assert.equal(run.pairs.ambiguous.size, 2);
+  assert.equal(run.pairs.ausentes.length, 2);
+  assert.equal(run.pairs.sobras.length, 1);
+  assert.ok(run.divergences.filter(row => row.tipo === 'ausente_banco').every(row => /sem vínculo único/.test(row.observacao)));
+});
+
+test('créditos PIX sem venda correspondente ficam como sobras, sem inventar valor divergente', () => {
+  const receipts = engine.parsePixMatrix(pixMatrix('87041-2', [pixRow(10000, 10000, 'RECEBIMENTO PIX CIELO S.A')]), 'lj1.xls', 'Extrato');
+  const [run] = engine.buildPixStoreRuns([pixSale('1', 10)], receipts);
+  assert.equal(run.pairs.divergValor.length, 0);
+  assert.equal(run.pairs.ausentes.length, 1);
+  assert.equal(run.pairs.sobras.length, 1);
+  assert.equal(run.summary[0].banco, 10000);
+  assert.throws(() => engine.buildPixStoreRuns([pixSale('3', 10)], receipts), /Falta o extrato PIX/);
+  assert.throws(() => engine.buildPixStoreRuns([pixSale('1', 10)], engine.parsePixMatrix(pixMatrix('99999-0', [pixRow(10)]), 'unknown.xls', 'Extrato')), /não cadastrada/);
+});
+
+test('PIX exporta as duas origens do recebimento sem alterar os dados extraídos', () => {
+  const sheets = [];
+  const parser = loadEngine({ XLSX: { utils: { json_to_sheet: rows => rows, book_append_sheet: (wb, rows, name) => sheets.push({ rows, name }) } } });
+  const matrix = pixMatrix('75073-5', [pixRow(10)]);
+  parser.state.parsed.sicredi = parser.normalizePixStatements([...parser.parsePixMatrix(matrix, 'lj2.xls', 'Extrato'), ...parser.parsePixMatrix(matrix, 'lj4.xls', 'Extrato')]);
+  parser.appendStoreAudit({});
+  assert.equal(sheets[0].rows.length, 2);
+  assert.equal(sheets[0].rows[0]['Conta PIX'], '75073-5');
+  assert.equal(sheets[0].rows[1]['Arquivo'], 'lj4.xls');
+  assert.match(sheets[0].rows[1]['Origem duplicada'], /contado uma vez/);
+  assert.equal(sheets[0].rows[1]['Celulas originais'], JSON.stringify(matrix[3]));
+});
 
 const cardHeader = ['Data da venda', 'Hora da venda', 'Código de autorização', 'Código do estabelecimento', 'Modalidade', 'Produto', 'Parcelas', 'Bandeira', 'Canal', 'Valor bruto transação', 'Valor bruto da parcela', 'Valor da taxa (MDR)', 'Valor líquido da parcela/transação', 'Status', 'Número do terminal', 'Comprovante de venda'];
 const cardRow = (changes = {}) => {

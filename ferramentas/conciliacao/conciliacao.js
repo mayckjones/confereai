@@ -43,6 +43,16 @@ var SHARED_CARD_ACCOUNTS = {
   } }
 };
 function sharedCardAccount(tx){ return SHARED_CARD_ACCOUNTS[tx.estabelecimento]; }
+// A conta 75073-5 recebe PIX de duas unidades; o extrato não identifica qual.
+var PIX_ACCOUNT_CONFIG = {
+  '2205|87041-2': { label: 'Loja 1', stores: ['1'] },
+  '2205|75073-5': { label: 'Lojas 2 e 7 MEG 4 · conta compartilhada', stores: ['2', 'LOJA_MEG_4'] },
+  '2205|75079-4': { label: 'Loja 3', stores: ['3'] },
+  '2205|83679-6': { label: 'Loja 6 MEG 5', stores: ['LOJA_MEG_5'] }
+};
+function compatiblePixStores(sale, receipt){
+  return receipt.lojasCanonicas && receipt.lojasCanonicas.length ? receipt.lojasCanonicas.includes(storeIdentity(sale)) : compatibleStores(sale, receipt);
+}
 function cardSourceLabel(list){
   var excel = list.some(function(tx){ return tx.origem === 'Cartões Excel'; });
   return excel ? (list.some(function(tx){ return tx.origem === 'Cielo'; }) ? 'Cartões (Cielo + Excel)' : 'Cartões Excel') : 'Cielo';
@@ -59,6 +69,7 @@ function normalizarLoja(value){
 }
 function storeIdentity(tx){
   if(tx.loja) return normalizarLoja(tx.loja);
+  if(tx.lojasCanonicas && tx.lojasCanonicas.length === 1) return tx.lojasCanonicas[0];
   if(!tx.estabelecimento) return '';
   var account = sharedCardAccount(tx);
   if(account) return account.terminals[tx.terminal] ? account.terminals[tx.terminal].store : '';
@@ -79,6 +90,7 @@ function storeMeta(tx){
   return '<small>' + escapeHtml(storeLabel(tx)) + '</small>' + (tx.lojaOriginal || tx.loja ? '<small>Identificada no arquivo como: ' + escapeHtml(tx.lojaOriginal || tx.loja) + '</small>' : '');
 }
 function receiptMeta(tx){
+  if(tx && tx.contaPix) return '<small>PIX · Cooperativa ' + escapeHtml(tx.cooperativaOriginal) + ' · Conta ' + escapeHtml(tx.contaOriginal) + '</small><small>' + escapeHtml((PIX_ACCOUNT_CONFIG[tx.contaPix] || {}).label || 'Conta sem cadastro') + '</small>' + (tx.origensPix && tx.origensPix.length > 1 ? '<small>Extratos duplicados reconhecidos: ' + escapeHtml(tx.origensPix.map(function(o){ return o.arquivo; }).join(', ')) + '</small>' : '');
   if(!tx || !tx.estabelecimento) return '';
   var account = sharedCardAccount(tx);
   return '<small>' + escapeHtml(tx.origem || 'Cielo') + ' · ' + escapeHtml(account ? account.label : 'Estabelecimento') + ' ' + escapeHtml(tx.estabelecimento) + (tx.terminal ? ' · Terminal ' + escapeHtml(tx.terminal) : '') + '</small>';
@@ -106,8 +118,9 @@ function appendStoreAudit(wb){
   var rows = [];
   Object.keys(state.parsed).forEach(function(source){
     state.parsed[source].forEach(function(tx){
-      (tx.linhasOriginais || [null]).forEach(function(line){
+      (tx.origensPix || tx.linhasOriginais || [null]).forEach(function(line, originIndex){
         rows.push({ 'Relatorio': tx.origem || source, 'Loja canonica': storeIdentity(tx), 'Loja atual': storeLabel(tx), 'Loja original': tx.lojaOriginal || tx.loja || '', 'Conta de recebimento': (sharedCardAccount(tx) || {}).label || '', 'Estabelecimento': tx.estabelecimento || '', 'Terminal': tx.terminal || '', 'Canal original': tx.canalOriginal || '', 'Comprovante': tx.comprovante || '', 'Autorizacao': tx.autorizacao || '', 'Arquivo': tx.arquivo || '', 'Aba': tx.aba || '', 'Linha da planilha': line ? line.linha : '', 'Parcela original': line ? line.parcelaOriginal : '', 'Celulas originais': line ? JSON.stringify(line.celulas) : '', 'Registro': tx.registro || tx.documento || '', 'Data conciliada': tx.data || '', 'Data original': tx.dataOriginal || '', 'Periodo original': tx.periodoOriginal || '', 'Ajuste de data': tx.ajusteData || '', 'Linha original': line ? line.raw : tx.raw || '' });
+        if(tx.contaPix) Object.assign(rows[rows.length - 1], { 'Conta PIX': tx.contaOriginal, 'Cooperativa PIX': tx.cooperativaOriginal, 'Lojas da conta': (tx.lojasCanonicas || []).map(function(id){ return STORE_CONFIG[id].label; }).join(' / '), 'Arquivo': line && line.arquivo || tx.arquivo, 'Aba': line && line.aba || tx.aba, 'Origem duplicada': originIndex > 0 ? 'Sim; recebimento contado uma vez' : 'Não' });
       });
     });
   });
@@ -487,41 +500,85 @@ async function detectXlsxType(file){
    PARSING — EXTRATO SICREDI (PIX)
    ========================================================================= */
 async function parseSicredi(file){
-  var wb = await readWorkbook(file);
-  var matrix = null, headerIdx = -1;
-  for(var sheetIndex = 0; sheetIndex < wb.SheetNames.length; sheetIndex++){
-    var candidate = sheetToMatrix(wb, sheetIndex);
-    var idx = findPixHeaderRow(candidate);
-    if(idx !== -1){ matrix = candidate; headerIdx = idx; break; }
-  }
-  if(headerIdx === -1 || !matrix) throw new Error('Não foi possível localizar o cabeçalho no extrato PIX.');
-
-  var header = matrix[headerIdx];
-  var colData = findColIndex(header, ['data']);
-  var colDesc = findColIndex(header, ['descri', 'hist', 'pagador', 'nome', 'lançamento', 'lancamento', 'detalhe', 'tipo']);
-  var colDoc  = findColIndex(header, ['documento', 'doc']);
-  var colValor= findColIndex(header, ['valor']);
-
-  if(colData === -1 || colValor === -1) throw new Error('Colunas obrigatórias (Data/Valor) não encontradas no extrato Sicredi.');
-
-  var out = [];
-  for(var i = headerIdx + 1; i < matrix.length; i++){
-    var row = matrix[i];
-    if(!row || row.every(function(c){ return String(c || '').trim() === ''; })) continue;
-    var rowText = row.map(function(c){ return String(c || ''); }).join(' ');
-    if(!/RECEBIMENTO\s+PIX/i.test(rowText)) continue;
-    var data = parseDateAny(row[colData]);
-    var valor = parseValorBR(row[colValor]);
-    if(!data || isNaN(valor)) continue;
-    if(valor <= 0) continue;
-    out.push({
-      origem: 'Sicredi', data: data, hora: null, modalidade: 'PIX',
-      documento: colDoc !== -1 ? String(row[colDoc] || '') : '',
-      valor: valor,
-      raw: colDesc !== -1 ? String(row[colDesc] || '') : rowText
-    });
-  }
+  var wb = await readWorkbook(file), out = [], found = false;
+  wb.SheetNames.forEach(function(name, index){
+    var matrix = sheetToMatrix(wb, index);
+    if(findPixHeaderRow(matrix) !== -1){ found = true; out = out.concat(parsePixMatrix(matrix, file.name, name)); }
+  });
+  if(!found) throw new Error('Cabeçalho Data/Descrição/Valor não encontrado no extrato PIX.');
   return out;
+}
+function parsePixMatrix(matrix, filename, sheetName){
+  var idx = findPixHeaderRow(matrix);
+  if(idx === -1) throw new Error('Cabeçalho do extrato PIX não encontrado.');
+  function meta(label){
+    var row = matrix.slice(0, idx).find(function(r){ return normalizeText(r[0]).replace(/:$/, '') === label; });
+    return row ? String(row[1] == null ? '' : row[1]) : '';
+  }
+  var contaOriginal = meta('CONTA'), cooperativaOriginal = meta('COOPERATIVA');
+  var accountKey = cooperativaOriginal.trim() + '|' + contaOriginal.trim();
+  var config = PIX_ACCOUNT_CONFIG[accountKey], header = matrix[idx].map(normalizeText);
+  var dateCol = header.findIndex(function(c){ return c === 'DATA'; });
+  var descCol = header.findIndex(function(c){ return /DESCRI|HIST|LANCAMENTO|DETALHE|TIPO/.test(c); });
+  var docCol = header.findIndex(function(c){ return /DOCUMENTO|^DOC$/.test(c); });
+  var valueCol = header.findIndex(function(c){ return /^VALOR/.test(c); });
+  if(dateCol === -1 || descCol === -1 || valueCol === -1) throw new Error('Colunas obrigatórias Data/Descrição/Valor ausentes no extrato PIX.');
+  var statementId = JSON.stringify(matrix), out = [];
+  matrix.slice(idx + 1).forEach(function(row, offset){
+    if(!/RECEBIMENTO\s+PIX/.test(normalizeText(row[descCol]))) return;
+    var data = parseDateAny(row[dateCol]), valor = parseValorBR(row[valueCol]);
+    if(!data || !Number.isFinite(valor) || valor <= 0) return;
+    var original = { arquivo: filename || '', aba: sheetName || '', linha: idx + offset + 2, celulas: row.slice(), raw: row.map(function(c){ return String(c == null ? '' : c); }).join(' | ') };
+    out.push({ origem: 'Sicredi', modalidade: 'PIX', data: data, dataOriginal: String(row[dateCol]), hora: null,
+      documento: docCol === -1 ? '' : String(row[docCol] || ''), valor: valor,
+      descricao: row[descCol], raw: original.raw, arquivo: filename || '', aba: sheetName || '',
+      contaPix: contaOriginal ? accountKey : '', contaOriginal: contaOriginal, cooperativaOriginal: cooperativaOriginal,
+      lojasCanonicas: config ? config.stores.slice() : [], extratoPixId: statementId, linhasOriginais: [original] });
+  });
+  return out;
+}
+function normalizePixStatements(receipts){
+  var unique = new Map(), out = [];
+  receipts.forEach(function(tx){
+    // Deduplicar somente extratos completos identicos da mesma conta. A linha
+    // faz parte da chave para preservar pagamentos iguais dentro do extrato.
+    var line = (tx.linhasOriginais || [])[0];
+    var key = tx.contaPix && tx.extratoPixId && line ? JSON.stringify([tx.contaPix, tx.extratoPixId, line.linha]) : null;
+    var origins = tx.origensPix || tx.linhasOriginais || [];
+    if(key && unique.has(key)){
+      var existing = unique.get(key);
+      origins.forEach(function(origin){
+        if(!existing.origensPix.some(function(o){ return o.arquivo === origin.arquivo && o.aba === origin.aba && o.linha === origin.linha; })) existing.origensPix.push(origin);
+      });
+    } else {
+      var copy = Object.assign({}, tx, { origensPix: origins.slice() });
+      out.push(copy); if(key) unique.set(key, copy);
+    }
+  });
+  return out;
+}
+function buildPixStoreRuns(sales, receipts){
+  if(sales.some(function(tx){ return tx.modalidade !== 'PIX'; })) throw new Error('Para PIX, envie a Relação com Forma Pagto.: CARTEIRA DIGITAL.');
+  var bank = normalizePixStatements(receipts), groups = new Map();
+  sales.forEach(function(tx){
+    var key = Object.keys(PIX_ACCOUNT_CONFIG).find(function(id){ return PIX_ACCOUNT_CONFIG[id].stores.includes(storeIdentity(tx)); });
+    if(!key) throw new Error('A loja ' + tx.loja + ' não tem uma conta PIX cadastrada.');
+    if(!groups.has(key)) groups.set(key, []); groups.get(key).push(tx);
+  });
+  bank.forEach(function(tx){
+    if(!PIX_ACCOUNT_CONFIG[tx.contaPix]) throw new Error('Conta PIX ' + (tx.contaOriginal || 'não identificada') + ' não cadastrada. Confira cooperativa e conta no extrato.');
+    if(!groups.has(tx.contaPix)) groups.set(tx.contaPix, []);
+  });
+  return Object.keys(PIX_ACCOUNT_CONFIG).filter(function(key){ return groups.has(key); }).map(function(key){
+    var config = PIX_ACCOUNT_CONFIG[key], caixa = groups.get(key), pix = bank.filter(function(tx){ return tx.contaPix === key; });
+    if(!pix.length) throw new Error('Falta o extrato PIX da conta ' + key.split('|')[1] + ' (' + config.label + ').');
+    var result = reconcile(caixa, pix, []);
+    if(config.stores.length > 1) config.stores.forEach(function(id){
+      var list = caixa.filter(function(tx){ return storeIdentity(tx) === id; });
+      result.summary.push({ info: true, modalidade: 'Sistema · ' + STORE_CONFIG[id].label, caixa: sumValues(list), banco: null, batidos: 0, totalCaixaCount: list.length });
+    });
+    return { store: 'PIX_' + key, accountPix: key, label: config.label, parsed: { caixa: caixa, sicredi: pix, cielo: [], lancamentos: [] }, cardAudit: null, divergences: result.divergences, summary: result.summary, pairs: result.pairs };
+  });
 }
 
 /* =========================================================================
@@ -651,40 +708,20 @@ function parseCieloPdfLines(lines){
    MOTOR DE CONCILIAÇÃO
    ========================================================================= */
 function matchModalidade(caixaList, bankList){
-  var caixaRemain = caixaList.slice();
-  var bankRemain = bankList.slice();
-  var matched = [];
-
-  for(var i = caixaRemain.length - 1; i >= 0; i--){
-    var c = caixaRemain[i];
-    var bestIdx = -1;
-    for(var j = 0; j < bankRemain.length; j++){
-      var b = bankRemain[j];
-      if(isDateMatch(c, b) && Math.abs(c.valor - b.valor) <= 0.009){ bestIdx = j; break; }
-    }
-    if(bestIdx >= 0){
-      matched.push({ caixa: c, banco: bankRemain[bestIdx] });
-      bankRemain.splice(bestIdx, 1);
-      caixaRemain.splice(i, 1);
-    }
-  }
-
-  var divergValor = [];
-  for(var i2 = caixaRemain.length - 1; i2 >= 0; i2--){
-    var c2 = caixaRemain[i2];
-    var bestIdx2 = -1;
-    for(var j2 = 0; j2 < bankRemain.length; j2++){
-      var b2 = bankRemain[j2];
-      if(isDateMatch(c2, b2)){ bestIdx2 = j2; break; }
-    }
-    if(bestIdx2 >= 0){
-      divergValor.push({ caixa: c2, banco: bankRemain[bestIdx2] });
-      bankRemain.splice(bestIdx2, 1);
-      caixaRemain.splice(i2, 1);
-    }
-  }
-
-  return { matched: matched, divergValor: divergValor, ausentes: caixaRemain, sobras: bankRemain };
+  var left = caixaList.slice(), right = bankList.slice(), matched = [], ambiguous = new Set();
+  function candidates(sale){ return right.filter(function(receipt){ return compatiblePixStores(sale, receipt) && isDateMatch(sale, receipt) && cents(sale.valor) === cents(receipt.valor); }); }
+  left.slice().forEach(function(sale){
+    var choices = candidates(sale);
+    if(!choices.length) return;
+    var competitors = left.filter(function(other){ return compatiblePixStores(other, choices[0]) && isDateMatch(other, choices[0]) && cents(other.valor) === cents(choices[0].valor); });
+    if(new Set(competitors.map(storeIdentity)).size > 1){ competitors.forEach(function(tx){ ambiguous.add(tx); }); return; }
+    matched.push({ caixa: sale, banco: choices[0], confidence: 'valor' });
+    left.splice(left.indexOf(sale), 1); right.splice(right.indexOf(choices[0]), 1);
+  });
+  // Sem horario ou identificador unico, datas iguais nao provam divergencia
+  // de valor. Recebimentos sem vinculo permanecem visiveis como sobras.
+  var ambiguousBank = new Set(right.filter(function(receipt){ return left.some(function(sale){ return ambiguous.has(sale) && compatiblePixStores(sale, receipt) && isDateMatch(sale, receipt) && cents(sale.valor) === cents(receipt.valor); }); }));
+  return { matched: matched, divergValor: [], ausentes: left, sobras: right, ambiguous: ambiguous, ambiguousBank: ambiguousBank };
 }
 
 function matchCardTransactions(caixaList, bankList){
@@ -758,6 +795,9 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
         valorCaixa: null, valorBanco: item.valor, origemBanco: item.origem
       });
     }
+    var receipt = item.banco || item;
+    if(receipt.contaPix) Object.assign(divergences[divergences.length - 1], { contaPix: receipt.contaPix, contaOriginal: receipt.contaOriginal, cooperativaOriginal: receipt.cooperativaOriginal, lojasCanonicas: receipt.lojasCanonicas, origensPix: receipt.origensPix });
+    if((resultado.ambiguous && resultado.ambiguous.has(item)) || (resultado.ambiguousBank && resultado.ambiguousBank.has(item))) divergences[divergences.length - 1].observacao = 'PIX sem vínculo único: há vendas de lojas diferentes com a mesma data e valor na conta compartilhada.';
   }
 
   resultado.divergValor.forEach(function(item){ pushDiverg('valor_divergente', item, origem); });
@@ -992,10 +1032,11 @@ function updateProcessButtonState(){
   } else if(!hasComparativo){
     hint.textContent = 'Envie os relatórios de cartões em PDF/Excel ou a planilha de extrato PIX.';
   } else {
-    hint.textContent = state.files.cartoesExcel.length ? 'Planilha incluída: Loja 2 e POS da Loja 7 MEG 4 serão conciliados nas respectivas abas.' : state.files.lancamentos.length ? 'Conferência detalhada pronta: valores, bandeiras, débito/crédito e parcelas.' : 'Conciliação de valores pronta. O relatório de lançamentos é opcional.';
+    hint.textContent = state.files.sicredi.length ? 'PIX pronto: conciliação por conta, com extratos idênticos contados uma vez e conta compartilhada das lojas 2 e 7.' : state.files.cartoesExcel.length ? 'Planilha incluída: Loja 2 e POS da Loja 7 MEG 4 serão conciliados nas respectivas abas.' : state.files.lancamentos.length ? 'Conferência detalhada pronta: valores, bandeiras, débito/crédito e parcelas.' : 'Conciliação de valores pronta. O relatório de lançamentos é opcional.';
   }
   document.getElementById('btnAddDetails').hidden = state.files.lancamentos.length > 0;
   document.querySelector('.detail-upload').classList.toggle('is-ready', state.files.lancamentos.length > 0);
+  document.querySelector('.detail-upload').hidden = state.files.sicredi.length > 0;
   document.getElementById('slot-sicredi').hidden = hasCards;
   document.getElementById('slot-cielo').hidden = state.files.sicredi.length > 0;
   document.getElementById('slot-cartoesExcel').hidden = state.files.sicredi.length > 0;
@@ -1051,10 +1092,15 @@ document.getElementById('btnProcess').addEventListener('click', async function()
     }
 
     showOverlay('Cruzando transações…');
+    sicrediTx = normalizePixStatements(sicrediTx);
     launchTx = normalizeLaunchDates(caixaTx, cieloTx, launchTx);
     var storeCount = new Set(caixaTx.map(function(tx){ return storeIdentity(tx); })).size;
     if(cieloTx.length && (storeCount > 1 || cieloTx.some(function(tx){ return !!sharedCardAccount(tx); }))){
       state.storeRuns = buildStoreRuns(caixaTx, cieloTx, launchTx);
+      state.activeStoreIndex = 0;
+      applyStoreRun(state.storeRuns[0]);
+    } else if(sicrediTx.length && (storeCount > 1 || sicrediTx.every(function(tx){ return !!PIX_ACCOUNT_CONFIG[tx.contaPix]; }))){
+      state.storeRuns = buildPixStoreRuns(caixaTx, sicrediTx);
       state.activeStoreIndex = 0;
       applyStoreRun(state.storeRuns[0]);
     } else {
@@ -1136,6 +1182,11 @@ function renderResults(){
   }
   document.getElementById('analysisScope').textContent = state.cardAudit ? 'Valores + dados dos cartões' : 'Bandeira e modalidade internas não verificadas';
   if(!cielo.length) document.getElementById('analysisScope').textContent = 'Recebimentos PIX';
+  if(!cielo.length && state.storeRuns.length && state.storeRuns[state.activeStoreIndex].accountPix){
+    var pixConfig = PIX_ACCOUNT_CONFIG[state.storeRuns[state.activeStoreIndex].accountPix];
+    document.getElementById('analysisMode').textContent = 'Conferência PIX · ' + pixConfig.label;
+    document.getElementById('analysisScope').textContent = pixConfig.stores.length > 1 ? 'PIX · conta compartilhada · vínculos ambíguos ficam pendentes' : 'Recebimentos PIX por conta e loja';
+  }
   document.getElementById('tab-cards').hidden = !state.cardAudit;
   selectResultView('overview');
   document.getElementById('mCaixa').textContent = fmtBRL(caixa.reduce(function(s,t){ return s+t.valor; },0));
@@ -1197,7 +1248,7 @@ function renderResults(){
     divEmpty.style.display = 'none';
     state.divergences.slice().sort(function(a,b){ return (a.data || '').localeCompare(b.data || ''); }).forEach(function(d){
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + badgeFor(d.tipo) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + responsibilityMeta(d) + storeMeta(d) + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
+      tr.innerHTML = '<td>' + badgeFor(d.tipo, !!d.observacao) + '</td><td>' + (MODAL_LABEL[d.modalidade] || d.modalidade) + '</td><td class="mono">' + (d.data ? formatDateBR(d.data) : '—') + '</td><td class="mono">' + (d.hora || '—') + '</td><td class="mono">' + (d.documento || '—') + responsibilityMeta(d) + storeMeta(d) + receiptMeta(d) + (d.observacao ? '<small>' + escapeHtml(d.observacao) + '</small>' : '') + '</td><td class="num">' + (d.valorCaixa !== null && d.valorCaixa !== undefined ? fmtBRL(d.valorCaixa) : '—') + '</td><td class="num">' + (d.valorBanco !== null && d.valorBanco !== undefined ? fmtBRL(d.valorBanco) : '—') + '</td><td>' + (d.origemBanco || '—') + '</td>';
       divBody.appendChild(tr);
     });
   }
@@ -1210,7 +1261,7 @@ function renderResults(){
   document.getElementById('sourceBTitle').textContent = 'B · ' + comparativoNome;
   document.getElementById('sourceBNote').textContent = cielo.length
     ? 'Vendas aprovadas dos relatórios de cartões. O cruzamento usa loja, data, valor e proximidade de horário. A conta compartilhada é separada pelos terminais cadastrados. Sem vínculo único, a venda fica sem correspondência.'
-    : 'Somente lançamentos "RECEBIMENTO PIX" extraídos da planilha. Valores iguais ficam na mesma linha do Caixa.';
+    : 'Somente recebimentos PIX positivos. Extratos idênticos da mesma conta são contados uma vez. O vínculo usa conta, loja, data e valor; valores iguais entre lojas da conta compartilhada ficam pendentes.';
 
   function escapeHtml(value){
     return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1291,7 +1342,11 @@ function buildCardChannelGroups(audit){
 }
 
 function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.cielo); }
-function storeFileSuffix(){ return state.storeRuns.length ? '_loja_' + state.storeRuns[state.activeStoreIndex].label.match(/\d+/)[0] : ''; }
+function storeFileSuffix(){
+  if(!state.storeRuns.length) return '';
+  var run = state.storeRuns[state.activeStoreIndex];
+  return run.accountPix ? '_pix_conta_' + run.accountPix.replace('|', '_') : '_loja_' + run.label.match(/\d+/)[0];
+}
 
 function renderCardAudit(){
   var audit = state.cardAudit, rows = audit.rows;
@@ -1370,7 +1425,8 @@ document.getElementById('btnExportDetails').addEventListener('click', function()
   XLSX.writeFile(wb, 'conferencia_cartoes' + storeFileSuffix() + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 });
 
-function badgeFor(tipo){
+function badgeFor(tipo, pendingPix){
+  if(pendingPix) return '<span class="badge b-amber"><span class="badge-dot"></span>Vínculo PIX pendente</span>';
   if(tipo === 'ausente_banco') return '<span class="badge b-red"><span class="badge-dot"></span>Ausente no banco</span>';
   if(tipo === 'valor_divergente') return '<span class="badge b-amber"><span class="badge-dot"></span>Valor divergente</span>';
   if(tipo === 'sobra_banco') return '<span class="badge b-blue"><span class="badge-dot"></span>Sobra no banco</span>';
@@ -1385,7 +1441,7 @@ document.getElementById('btnExport').addEventListener('click', function(){
   if(state.divergences.length === 0){ showToast('Não há divergências para exportar.', true); return; }
   var rows = state.divergences.map(function(d){
     return {
-      'Tipo': d.tipo === 'ausente_banco' ? 'Ausente no banco/adquirente' : d.tipo === 'valor_divergente' ? 'Valor divergente' : 'Sobra no banco/adquirente',
+      'Tipo': d.observacao ? 'Vínculo PIX pendente' : d.tipo === 'ausente_banco' ? 'Ausente no banco/adquirente' : d.tipo === 'valor_divergente' ? 'Valor divergente' : 'Sobra no banco/adquirente',
       'Modalidade': MODAL_LABEL[d.modalidade] || d.modalidade,
       'Data': d.data ? formatDateBR(d.data) : '',
       'Hora': d.hora || '',
@@ -1394,7 +1450,8 @@ document.getElementById('btnExport').addEventListener('click', function(){
       'Código vendedor': d.codigoVendedor || '',
       'Valor Caixa (R$)': d.valorCaixa !== null && d.valorCaixa !== undefined ? Number(d.valorCaixa.toFixed(2)) : '',
       'Valor Banco (R$)': d.valorBanco !== null && d.valorBanco !== undefined ? Number(d.valorBanco.toFixed(2)) : '',
-      'Origem Banco': d.origemBanco || ''
+      'Origem Banco': d.origemBanco || '',
+      'Observação': d.observacao || '', 'Conta PIX': d.contaOriginal || ''
     };
   });
   var ws = XLSX.utils.json_to_sheet(rows);
@@ -1406,9 +1463,9 @@ document.getElementById('btnExport').addEventListener('click', function(){
     return {
       'Modalidade': s.modalidade,
       'Total Caixa (R$)': Number(s.caixa.toFixed(2)),
-      'Total Banco/Adquirente (R$)': Number(s.banco.toFixed(2)),
-      'Diferença (R$)': Number((s.caixa - s.banco).toFixed(2)),
-      'Transações batidas': s.batidos + '/' + s.totalCaixaCount
+      'Total Banco/Adquirente (R$)': s.info ? '' : Number(s.banco.toFixed(2)),
+      'Diferença (R$)': s.info ? '' : Number((s.caixa - s.banco).toFixed(2)),
+      'Transações batidas': s.info ? '' : s.batidos + '/' + s.totalCaixaCount
     };
   });
   var ws2 = XLSX.utils.json_to_sheet(summaryRows);
