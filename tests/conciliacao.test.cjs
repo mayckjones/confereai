@@ -10,12 +10,128 @@ function loadEngine(extra = {}){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, normalizeLaunchDates, dateMeta, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { state, parseCardMatrix, parseCielo, detectXlsxType, receiptMeta, cardSourceLabel, normalizeLaunchDates, dateMeta, normalizarLoja, storeIdentity, storeMeta, appendStoreAudit, brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, buildStoreRuns, reconcile }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
 
 const engine = loadEngine();
+
+const cardHeader = ['Data da venda', 'Hora da venda', 'Código de autorização', 'Código do estabelecimento', 'Modalidade', 'Produto', 'Parcelas', 'Bandeira', 'Canal', 'Valor bruto transação', 'Valor bruto da parcela', 'Valor da taxa (MDR)', 'Valor líquido da parcela/transação', 'Status', 'Número do terminal', 'Comprovante de venda'];
+const cardRow = (changes = {}) => {
+  const values = ['06/10/2026', ' 10:00:30', 'ABC123', '44260107', 'Crédito', 'Crédito a Vista', '-', 'Visa', 'TEF IP', 10, 10, 0.1, 9.9, 'Aprovada', 'TFI09E52', '001025078'];
+  Object.entries(changes).forEach(([column, value]) => { values[Number(column)] = value; });
+  return values;
+};
+
+test('Excel da conta compartilhada consolida parcelas sem duplicar bruto e preserva células originais', () => {
+  const rows = [cardHeader, cardRow({ 6: '1 de 2', 9: 101.97, 10: 50.99, 11: 0.76, 12: 50.23 }), cardRow({ 6: '2 de 2', 9: 101.97, 10: 50.98, 11: 0.76, 12: 50.22 })];
+  const before = JSON.stringify(rows);
+  const [tx] = engine.parseCardMatrix(rows, 'relatorio lj 2.xlsx', 'Sheet1');
+  assert.equal(tx.valor, 101.97);
+  assert.equal(tx.valorLiquido, 100.45);
+  assert.equal(tx.taxa, 1.52);
+  assert.equal(tx.parcelas, 2);
+  assert.equal(tx.lojaCanonica, '2');
+  assert.equal(tx.canal, 'TEF');
+  assert.equal(tx.canalOriginal, 'TEF IP');
+  assert.equal(tx.comprovante, '001025078');
+  assert.equal(tx.linhasOriginais.length, 2);
+  assert.equal(tx.linhasOriginais[0].linha, 2);
+  assert.equal(tx.linhasOriginais[1].parcelaOriginal, '2 de 2');
+  assert.equal(JSON.stringify(tx.linhasOriginais[0].celulas), JSON.stringify(rows[1]));
+  assert.equal(JSON.stringify(rows), before);
+  assert.ok(engine.receiptMeta(tx).includes('Conta da Loja 2'));
+});
+
+test('Excel ignora status não aprovados e evita juntar comprovantes de terminais diferentes', () => {
+  const transactions = engine.parseCardMatrix([cardHeader,
+    cardRow(), cardRow({ 14: 'APT0NR6Y', 8: 'APOS Sitef' }),
+    ...['Recusada', 'Desfeita', 'Autorizada', 'Cancelada'].map(status => cardRow({ 13: status }))
+  ]);
+  assert.equal(transactions.length, 2);
+  assert.equal(transactions[0].lojaCanonica, '2');
+  assert.equal(transactions[1].lojaCanonica, 'LOJA_MEG_4');
+  assert.equal(transactions[1].canal, 'POS');
+});
+
+test('parcelas faltantes, repetidas ou inconsistentes não produzem totais falsos', () => {
+  const first = cardRow({ 6: '1 de 2', 9: 20, 10: 10 });
+  const second = cardRow({ 6: '2 de 2', 9: 20, 10: 10 });
+  assert.throws(() => engine.parseCardMatrix([cardHeader, first]), /incompletas/);
+  assert.throws(() => engine.parseCardMatrix([cardHeader, first, first]), /repetida/);
+  assert.throws(() => engine.parseCardMatrix([cardHeader, first, cardRow({ 6: '2 de 2', 9: 20, 10: 9 })]), /total incompatível/);
+  assert.throws(() => engine.parseCardMatrix([cardHeader, first, cardRow({ 6: '2 de 2', 9: 30, 10: 10 })]), /incompatíveis/);
+  assert.equal(engine.parseCardMatrix([cardHeader, first, second]).length, 1);
+});
+
+test('loja 2 entra na conciliação e POS da conta compartilhada fica na aba da Loja 7 MEG 4', () => {
+  const excel = engine.parseCardMatrix([cardHeader, cardRow(), cardRow({ 14: 'APT0NR6Y', 8: 'APOS Sitef', 9: 20, 10: 20, 15: '000000017' })]);
+  const sales = [
+    { ...sale(10, '10:00', '2'), data: '2026-10-06', loja: '2' },
+    { ...sale(20, '10:00', '4'), data: '2026-10-06', loja: '7' },
+    { ...sale(30, '11:00', '7'), data: '2026-10-06', loja: '4' }
+  ];
+  const cielo = [{ ...bank(30, '11:00'), data: '2026-10-06', estabelecimento: '3002105343' }];
+  const before = JSON.stringify({ sales, excel, cielo });
+  const runs = engine.buildStoreRuns(sales, cielo.concat(excel), []);
+  assert.deepEqual(Array.from(runs, run => run.store), ['2', 'LOJA_MEG_4']);
+  assert.equal(runs[0].summary[0].caixa, 10);
+  assert.equal(runs[0].summary[0].banco, 10);
+  assert.equal(runs[1].summary[0].caixa, 50);
+  assert.equal(runs[1].summary[0].banco, 50);
+  assert.equal(runs[1].parsed.cielo.length, 2);
+  assert.equal(runs[1].parsed.cielo.find(tx => tx.terminal).estabelecimento, '44260107');
+  assert.ok(runs.every(run => run.divergences.length === 0));
+  assert.equal(engine.cardSourceLabel(runs[1].parsed.cielo), 'Cartões (Cielo + Excel)');
+  assert.equal(JSON.stringify({ sales, excel, cielo }), before);
+  assert.notEqual(engine.normalizarLoja('2'), engine.normalizarLoja('4'));
+});
+
+test('terminal sem cadastro ou canal conflitante na conta compartilhada exige conferência', () => {
+  const sales = [{ ...sale(10, '10:00'), data: '2026-10-06', loja: '2' }];
+  const unknown = engine.parseCardMatrix([cardHeader, cardRow({ 14: 'DESCONHECIDO' })]);
+  assert.equal(engine.storeIdentity(unknown[0]), '');
+  assert.equal(engine.matchCardTransactions(sales, unknown).matched.length, 0);
+  assert.throws(() => engine.buildStoreRuns(sales, unknown, []), /Terminal DESCONHECIDO/);
+  const conflict = engine.parseCardMatrix([cardHeader, cardRow({ 8: 'APOS Sitef' })]);
+  assert.throws(() => engine.buildStoreRuns(sales, conflict, []), /Canal incompatível/);
+});
+
+test('planilha é detectada por conteúdo e pode ser lida em aba posterior à capa', async () => {
+  const matrix = [cardHeader, cardRow()];
+  const workbook = { SheetNames: ['Capa', 'Vendas'], Sheets: { Capa: [['Relatório']], Vendas: matrix } };
+  const parser = loadEngine({ XLSX: { read: () => workbook, utils: { sheet_to_json: sheet => sheet } } });
+  const file = { name: 'relatorio lj 2.xlsx', arrayBuffer: async () => new ArrayBuffer(0) };
+  assert.equal(await parser.detectXlsxType(file), 'cartoesExcel');
+  const [tx] = await parser.parseCielo(file);
+  assert.equal(tx.lojaCanonica, '2');
+  assert.equal(tx.arquivo, file.name);
+  assert.equal(tx.aba, 'Vendas');
+});
+
+test('formato tradicional de Excel Cielo continua sendo reconhecido', async () => {
+  const matrix = [['Data da venda', 'Hora da venda', 'Forma de pagamento', 'Valor bruto', 'Valor líquido', 'Bandeira', 'Parcelas', 'Status'], ['06/10/2026', '10:00', 'Crédito', 10, 9.9, 'Visa', 1, 'Aprovada']];
+  const parser = loadEngine({ XLSX: { read: () => ({ SheetNames: ['Vendas'], Sheets: { Vendas: matrix } }), utils: { sheet_to_json: sheet => sheet } } });
+  const file = { name: 'cielo.xlsx', arrayBuffer: async () => new ArrayBuffer(0) };
+  assert.equal(await parser.detectXlsxType(file), 'cielo');
+  const [tx] = await parser.parseCielo(file);
+  assert.equal(tx.valor, 10);
+  assert.equal(tx.origem, 'Cielo');
+  assert.equal(tx.bandeira, 'Visa');
+});
+
+test('exportação conserva todas as parcelas originais e a conta de destino', () => {
+  const sheets = [];
+  const parser = loadEngine({ XLSX: { utils: { json_to_sheet: rows => rows, book_append_sheet: (wb, rows, name) => sheets.push({ rows, name }) } } });
+  const rows = [cardHeader, cardRow({ 14: 'APT0NR6Y', 8: 'APOS Sitef', 6: '1 de 2', 9: 20, 10: 10 }), cardRow({ 14: 'APT0NR6Y', 8: 'APOS Sitef', 6: '2 de 2', 9: 20, 10: 10 })];
+  parser.state.parsed.cielo = parser.parseCardMatrix(rows, 'conta.xlsx', 'Vendas');
+  parser.appendStoreAudit({});
+  assert.equal(sheets[0].rows.length, 2);
+  assert.ok(sheets[0].rows.every(row => row['Loja canonica'] === 'LOJA_MEG_4' && row['Conta de recebimento'] === 'Conta da Loja 2' && row.Terminal === 'APT0NR6Y'));
+  assert.equal(sheets[0].rows[1]['Parcela original'], '2 de 2');
+  assert.equal(sheets[0].rows[1]['Celulas originais'], JSON.stringify(rows[2]));
+});
 
 test('período invertido e emissão em cabeçalhos repetidos não mudam a data das vendas', () => {
   const header = ['Emissao: 07/10/2026', '** Período: 10/06/26 a 10/06/26 ** Forma Pagto.: CARTÃO MAGNÉTICO'];
@@ -336,7 +452,7 @@ test('parcela fora da faixa do cartão cadastrado aparece sem perder o vínculo 
   assert.equal(warning.title, 'Venda em 2x; cartão selecionado de 1x');
   assert.match(warning.detail, /O caixa registrou 2x para a venda \(coluna Parc\. dos Lançamentos\)/);
   assert.match(warning.detail, /“TEF MASTER 1X” \(cód\. 1\), cadastrado para 1x/);
-  assert.match(warning.detail, /A Cielo também informa 2x/);
+  assert.match(warning.detail, /A adquirente também informa 2x/);
   assert.match(warning.detail, /cartão escolhido nessa segunda etapa/);
   assert.doesNotMatch(engine.cardRangeWarning({ ...row, confidence: 'valor' }).detail, /A Cielo também informa/);
 });
