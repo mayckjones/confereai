@@ -14,7 +14,7 @@
     <h3>Arraste os arquivos aqui</h3>
     <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + relatórios de cartões em PDF e Excel (ou extrato PIX).</p>
     <p class="dz-extra">Para várias lojas, envie a Relação completa, os Lançamentos e os PDFs Cielo. Adicione também a planilha de cartões da conta da Loja 2 para conciliar essa loja e o POS da Loja 7 MEG 4. Os resultados aparecem em abas por loja.</p>
-    <p class="dz-extra">Para PIX, envie a Relação com Forma Pagto.: CARTEIRA DIGITAL e os extratos das lojas. As lojas 2 e 7 MEG 4 compartilham uma conta; extratos idênticos são contados uma vez e a comparação aparece em uma aba conjunta, com subtotais por loja.</p>
+    <p class="dz-extra">Para PIX, envie a Relação com Forma Pagto.: CARTEIRA DIGITAL e os extratos das lojas. A conta 75073-5 recebe PIX das lojas 2 e 7 MEG 4: a conciliação compara data, valor e horário e separa as lojas em abas. Recebimentos sem vínculo único ficam pendentes. Extratos idênticos são contados uma vez.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -68,6 +68,7 @@
   </div>
 
   <div class="actions-row">
+    <label id="pixLimitControl" hidden>Excluir PIX a partir de R$ <input id="pixReceiptLimit" type="number" min="0.01" step="0.01" value="10000" style="width:110px"> (repasses Cielo também são excluídos)</label>
     <button class="btn btn-primary" id="btnProcess" disabled>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Processar conciliação
@@ -88,6 +89,8 @@
 
     <div class="store-tabs" id="storeTabs" role="tablist" aria-label="Lojas conciliadas" hidden></div>
     <div class="result-context"><span class="badge b-blue" id="analysisMode">Conciliação de valores</span><span id="analysisScope">Valores brutos de venda</span></div>
+    <div id="pixAccountWarning" role="status" hidden></div>
+    <details id="pixExcludedDetails" hidden><summary id="pixExcludedSummary"></summary><div id="pixExcludedRows"></div></details>
     <div class="result-tabs" role="tablist" aria-label="Visões da conciliação">
       <button id="tab-overview" role="tab" aria-selected="true" aria-controls="view-overview" data-view="overview" class="active">Visão geral</button>
       <button id="tab-cards" role="tab" aria-selected="false" aria-controls="view-cards" data-view="cards" tabindex="-1" hidden>Detalhes dos cartões <span id="cardTabCount">0</span></button>
