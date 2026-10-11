@@ -14,6 +14,7 @@
       </div>
       <h3>Arraste a planilha de pagamentos aqui</h3>
       <p>ou <span class="browse">clique para selecionar</span> o arquivo Excel (.xlsx, .xlsm, .xls) ou .csv</p>
+      <p>A coluna opcional <strong>TIPO DE RECIBO</strong> aceita Comissão ou Premiação. Deixe vazia para usar o modelo padrão.</p>
       <input id="reciboFileInput" type="file" accept=".xlsx,.xlsm,.xls,.csv" hidden>
     </div>
 
@@ -81,6 +82,7 @@
       </div>
       <p class="mestre-desc">
         Ao clicar em <strong>"Aplicar a Todos os Recibos"</strong>, os campos abaixo atualizarão simultaneamente todos os recibos da lista (preservando o nome do vendedor, CPF, valor individual, loja e data de cada um).
+        O motivo do pagamento será aplicado aos recibos do tipo Padrão; os motivos de Comissão e Premiação serão preservados.
       </p>
 
       <div class="mestre-form-grid">
@@ -214,7 +216,14 @@
             </div>
 
             <div class="form-group">
-              <label>Motivo do Pagamento</label>
+              <label for="editTipoRecibo">Tipo de Recibo</label>
+              <select id="editTipoRecibo" class="form-control" aria-label="Tipo de recibo">
+                <option value="">Padrão (dobra e alimentação)</option>
+                <option value="comissao">Comissão</option>
+                <option value="premiacao">Premiação</option>
+              </select>
+              <small class="form-hint">O tipo define o motivo abaixo. Os períodos de comissão e premiação ficam em xx/xx/xxxx para edição.</small>
+              <label for="editReferente">Motivo do Pagamento</label>
               <textarea id="editReferente" class="form-control" rows="2" placeholder="Referente a dobra e alimentação no fim de semana"></textarea>
             </div>
 
@@ -250,6 +259,7 @@
                   <th>Data</th>
                   <th>Loja</th>
                   <th>CNPJ</th>
+                  <th>Tipo de recibo</th>
                   <th>Ações</th>
                 </tr>
               </thead>

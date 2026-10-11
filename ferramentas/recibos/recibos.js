@@ -37,6 +37,26 @@ window.__tool_init_recibos = function() {
 
   let mestreConfig = criarConfigPadrao();
 
+  const motivosPorTipo = {
+    comissao: 'Referente a comissão no período de xx/xx/xxxx a xx/xx/xxxx',
+    premiacao: 'Referente a premiação de meta do mês de xx/xx/xxxx'
+  };
+
+  function normalizarTipoRecibo(value) {
+    const tipo = normalizarCabecalhoImportacao(value).toLowerCase();
+    if (['comissao', 'comisscao', 'comisssao'].includes(tipo)) return 'comissao';
+    if (tipo === 'premiacao') return 'premiacao';
+    return '';
+  }
+
+  function obterMotivoPorTipo(tipo) {
+    return motivosPorTipo[tipo] || mestreConfig.referente;
+  }
+
+  function obterNomeTipo(tipo) {
+    return { comissao: 'Comissão', premiacao: 'Premiação' }[tipo] || 'Padrão';
+  }
+
   // ELEMENTOS DO DOM
   const dropzone = document.getElementById('reciboDropzone');
   const fileInput = document.getElementById('reciboFileInput');
@@ -87,6 +107,7 @@ window.__tool_init_recibos = function() {
   const editCNPJ = document.getElementById('editCNPJ');
   const editEmpresa = document.getElementById('editEmpresa');
   const editReferente = document.getElementById('editReferente');
+  const editTipoRecibo = document.getElementById('editTipoRecibo');
   const editEmissao = document.getElementById('editEmissao');
   const btnDeleteCurrentReceipt = document.getElementById('btnDeleteCurrentReceipt');
   const btnAddNewReceipt = document.getElementById('btnAddNewReceipt');
@@ -265,6 +286,7 @@ window.__tool_init_recibos = function() {
       const dataFormatada = formatarDataEstrita(item.data);
       const extensoAuto = item.extenso || numeroParaExtenso(val);
       const lojaItem = (item.loja && String(item.loja).trim()) ? String(item.loja).trim() : String(lojaPadrao).trim();
+      const tipoRecibo = normalizarTipoRecibo(item.tipoRecibo);
 
       return {
         vendedor: String(item.vendedor || item.nome || '').trim().toUpperCase(),
@@ -275,7 +297,8 @@ window.__tool_init_recibos = function() {
         loja: lojaItem,
         cnpj: String(item.cnpj || '').trim(),
         empresa: item.empresa || mestreConfig.empresa,
-        referente: item.referente || mestreConfig.referente,
+        tipoRecibo,
+        referente: motivosPorTipo[tipoRecibo] || item.referente || mestreConfig.referente,
         emissao: item.emissao || mestreConfig.emissao
       };
     });
@@ -400,6 +423,7 @@ window.__tool_init_recibos = function() {
     editCNPJ.value = r.cnpj || '';
     editEmpresa.value = r.empresa || mestreConfig.empresa;
     editReferente.value = r.referente || mestreConfig.referente;
+    editTipoRecibo.value = r.tipoRecibo || '';
     editEmissao.value = r.emissao || mestreConfig.emissao;
 
     // PREVIEW WORD EM TEMPO REAL
@@ -462,6 +486,15 @@ window.__tool_init_recibos = function() {
   }
 
   // Escuta inputs no formulário individual
+  editTipoRecibo.addEventListener('change', () => {
+    if (recibosList.length === 0) return;
+    const r = recibosList[currentIndex];
+    r.tipoRecibo = normalizarTipoRecibo(editTipoRecibo.value);
+    editReferente.value = obterMotivoPorTipo(r.tipoRecibo);
+    salvarCamposFormulario();
+    renderizarTabela();
+  });
+
   [editVendedor, editLoja, editCPF, editCNPJ, editEmpresa, editReferente, editEmissao].forEach(input => {
     input.addEventListener('input', salvarCamposFormulario);
   });
@@ -499,6 +532,7 @@ window.__tool_init_recibos = function() {
         <td class="font-mono">${r.data || '—'}</td>
         <td>${r.loja || '—'}</td>
         <td class="font-mono">${r.cnpj || '—'}</td>
+        <td>${obterNomeTipo(r.tipoRecibo)}</td>
         <td>
           <button class="btn-row-action" data-index="${idx}">Selecionar</button>
         </td>
@@ -629,7 +663,8 @@ window.__tool_init_recibos = function() {
 
     recibosList.forEach(r => {
       r.empresa = novaEmpresa;
-      r.referente = novoReferente;
+      // O motivo mestre se aplica ao modelo padrão; preserve os textos dos tipos.
+      if (!r.tipoRecibo) r.referente = novoReferente;
       r.emissao = novaEmissao;
       if (novoCNPJ) {
         r.cnpj = novoCNPJ;
@@ -786,7 +821,8 @@ window.__tool_init_recibos = function() {
         cnpj: encontrarColunaCabecalho(headers, key => key.includes('CNPJ')),
         valor: encontrarColunaCabecalho(headers, key => key.includes('VALOR') || key === 'VL' || key.includes('TOTAL')),
         data: encontrarColunaCabecalho(headers, key => key.includes('DATA') || /^DT\b/.test(key)),
-        loja: encontrarColunaCabecalho(headers, key => key.includes('LOJA') || key.includes('FILIAL'))
+        loja: encontrarColunaCabecalho(headers, key => key.includes('LOJA') || key.includes('FILIAL')),
+        tipoRecibo: encontrarColunaCabecalho(headers, key => key === 'TIPO' || (key.includes('TIPO') && key.includes('RECIBO')))
       };
 
       if (detected.vendedor >= 0 && detected.valor >= 0 && detected.data >= 0) {
@@ -816,6 +852,7 @@ window.__tool_init_recibos = function() {
         cnpj: obterCelulaImportada(row, columns.cnpj),
         valor: obterCelulaImportada(row, columns.valor),
         data: obterCelulaImportada(row, columns.data),
+        tipoRecibo: obterCelulaImportada(row, columns.tipoRecibo),
         loja
       });
     }
@@ -954,7 +991,7 @@ window.__tool_init_recibos = function() {
   
   // Função auxiliar para gerar os parágrafos de um recibo no padrão docx
   function gerarParagrafosReciboDocx(docxLib, r) {
-    const { Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle } = docxLib;
+    const { Paragraph, TextRun, ImageRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle } = docxLib;
 
     const valorFmt = formatarMoeda(r.valor);
     const extensoTexto = r.extenso || numeroParaExtenso(r.valor);
