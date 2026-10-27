@@ -117,12 +117,6 @@
 .tool-conciliacao .optional-label{ display:inline-block; font-size:9px; margin-left:4px; padding:3px 6px; border-radius:5px; color:var(--gray-500); background:var(--gray-100); text-transform:none; }
 .tool-conciliacao #btnAddDetails{ padding:8px 10px; font-size:12px; }
 .tool-conciliacao .result-context{ margin:30px 0 14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--gray-500); }
-.tool-conciliacao .store-tabs{ display:flex; gap:8px; overflow-x:auto; margin-top:26px; padding-bottom:4px; }
-.tool-conciliacao .store-tabs[hidden]{ display:none; }
-.tool-conciliacao .store-tabs button{ flex:none; border:1px solid var(--gray-200); border-radius:10px; background:var(--card-bg); color:var(--gray-500); padding:10px 15px; font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; }
-.tool-conciliacao .store-tabs button.active{ color:var(--sky); border-color:var(--sky); background:var(--sky-bg); }
-.tool-conciliacao .store-tabs button:hover{ border-color:var(--sky); }
-.tool-conciliacao .store-tabs + .result-context{ margin-top:20px; }
 .tool-conciliacao .result-tabs{ display:flex; gap:5px; border-bottom:1px solid var(--gray-200); }
 .tool-conciliacao .result-tabs button{ position:relative; border:0; background:transparent; color:var(--gray-500); font-weight:600; font-family:inherit; font-size:13px; padding:15px 20px; cursor:pointer; border-bottom:3px solid transparent; }
 .tool-conciliacao .result-tabs button.active{ color:var(--sky); border-bottom-color:var(--sky); }
@@ -130,7 +124,6 @@
 .tool-conciliacao .result-tabs button span{ display:inline-flex; border-radius:6px; padding:2px 6px; font-size:10px; background:var(--amber-bg); color:var(--amber); margin-left:6px; }
 .tool-conciliacao .metrics{ grid-template-columns:repeat(3,minmax(0,1fr)); }
 .tool-conciliacao .file-slots.has-comparative{ grid-template-columns:repeat(2,minmax(0,1fr)); }
-.tool-conciliacao .file-slots.has-card-excel{ grid-template-columns:repeat(3,minmax(0,1fr)); }
 .tool-conciliacao .status-badge.review{ background:var(--amber-bg); color:var(--amber); }
 .tool-conciliacao .detail-heading{ display:flex; justify-content:space-between; align-items:center; gap:20px; margin:28px 0 22px; }
 .tool-conciliacao .detail-heading h2{ margin:8px 0; font-size:23px; font-weight:700; letter-spacing:-.6px; }
@@ -161,17 +154,9 @@
 .tool-conciliacao .card-audit-table td:first-child{ min-width:170px; }
 .tool-conciliacao .card-audit-table td:nth-child(3),.tool-conciliacao .card-audit-table td:nth-child(4){ min-width:185px; }
 .tool-conciliacao .card-audit-table small{ display:block; font-size:10px; color:var(--gray-500); margin-top:7px; font-family:inherit; }
-.tool-conciliacao .brand-mark svg{ filter:grayscale(1); opacity:.7; }
-.tool-conciliacao .brand-label:not(.field-warning) .hipercard-shape{ fill:#d1d5db; }
-.tool-conciliacao .brand-label.field-warning{ color:var(--amber); }
-.tool-conciliacao .brand-label.field-warning .brand-mark{ border-color:var(--amber); background:var(--amber-bg); }
-.tool-conciliacao .brand-label.field-warning .brand-mark svg{ filter:none; opacity:1; }
+.tool-conciliacao .field-warning{ color:var(--amber) !important; }
 .tool-conciliacao .audit-issue{ display:block; font-size:10px; font-weight:600; padding:5px 8px; border-radius:5px; background:var(--amber-bg); color:var(--amber); width:fit-content; margin-bottom:4px; }
-.tool-conciliacao .audit-card-range{ max-width:340px; margin-bottom:7px; padding:9px 10px; border-left:3px solid var(--amber); border-radius:6px; background:var(--amber-bg); }
-.tool-conciliacao .audit-card-range strong{ display:block; color:var(--amber); font-size:11px; line-height:1.4; }
-.tool-conciliacao .audit-card-range p{ margin:5px 0 0; color:var(--gray-700); font-size:10.5px; line-height:1.5; }
 .tool-conciliacao .audit-success{ color:var(--green); font-size:11px; font-weight:600; }
-.tool-conciliacao .responsibility-meta{ display:block; margin-top:4px; color:var(--gray-400); font-family:inherit; font-size:9.5px; font-weight:500; white-space:nowrap; }
 .tool-conciliacao .audit-evidence{ margin-top:8px; font-size:10px; color:var(--gray-500); max-width:290px; }
 .tool-conciliacao .audit-evidence summary{ cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
 .tool-conciliacao .audit-evidence p{ font-family:var(--mono); overflow-wrap:anywhere; line-height:1.7; }
@@ -187,16 +172,15 @@
 .tool-conciliacao .brand-label{ display:flex; gap:8px; align-items:center; font-size:12px; font-weight:600; }
 .tool-conciliacao .brand-mark{ display:inline-flex; width:36px; height:25px; border-radius:5px; align-items:center; justify-content:center; background:#fff; border:1px solid #e5e7eb; flex-shrink:0; }
 .tool-conciliacao .brand-mark svg{ width:30px; height:19px; }
-.tool-conciliacao .card-payment-row{ display:flex; align-items:center; flex-wrap:nowrap; gap:5px; margin-top:8px; }
-.tool-conciliacao .payment-label{ display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border-radius:5px; font-size:10px; font-weight:600; }
+.tool-conciliacao .payment-label{ margin-top:8px; display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border-radius:5px; font-size:10px; font-weight:600; }
 .tool-conciliacao .payment-label svg{ width:12px; height:12px; flex-shrink:0; }
-.tool-conciliacao .card-payment-row .card-channel,.tool-conciliacao .card-payment-row .payment-label,.tool-conciliacao .card-payment-row .installment-label{ box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; height:21px; margin:0; padding:3px 7px; border-radius:5px; background:var(--gray-100); color:var(--gray-500); font-size:10px; font-weight:600; line-height:1; vertical-align:middle; white-space:nowrap; }
-.tool-conciliacao .card-payment-row .payment-label.field-warning,.tool-conciliacao .card-payment-row .installment-label.field-warning{ background:var(--amber-bg); color:var(--amber); box-shadow:inset 0 0 0 1px var(--amber); }
-.tool-conciliacao .card-color-legend{ display:flex; align-items:center; flex-wrap:wrap; gap:8px 18px; padding:8px 18px 12px; border-top:1px solid var(--gray-100); color:var(--gray-500); font-size:10px; }
-.tool-conciliacao .card-color-legend > span{ display:inline-flex; align-items:center; gap:5px; }
-.tool-conciliacao .card-color-legend .legend-warning i{ display:inline-block; width:13px; height:13px; background:var(--amber-bg); border:1px solid var(--amber); border-radius:4px; }
+.tool-conciliacao .payment-label.debit{ background:var(--sky-bg); color:var(--sky); }
+.tool-conciliacao .payment-label.credit{ background:#f1eafd; color:#7546ac; }
+.tool-conciliacao .payment-label.unknown{ background:var(--gray-100); color:var(--gray-500); }
+.tool-conciliacao .payment-label.field-warning{ background:var(--amber-bg); }
+[data-theme="dark"] .tool-conciliacao .payment-label.credit{ background:#342742; color:#c4a2f2; }
 [data-theme="dark"] .tool-conciliacao{ --amber:#f5b549; --green:#4ade80; --sky:#82aeff; }
-[data-theme="dark"] .tool-conciliacao .detail-eyebrow,[data-theme="dark"] .tool-conciliacao .result-tabs button.active,[data-theme="dark"] .tool-conciliacao .detail-filters button.active{ color:#82aeff; }
+[data-theme="dark"] .tool-conciliacao .detail-eyebrow,[data-theme="dark"] .tool-conciliacao .result-tabs button.active,[data-theme="dark"] .tool-conciliacao .detail-filters button.active,[data-theme="dark"] .tool-conciliacao .payment-label.debit{ color:#82aeff; }
 @media(max-width:1000px){ .tool-conciliacao .detail-upload{ grid-template-columns:1fr; gap:16px; } .tool-conciliacao .detail-heading{ align-items:flex-start; flex-direction:column; } .tool-conciliacao .net-summary{ grid-template-columns:repeat(2,1fr); } }
 @media(max-width:700px){ .tool-conciliacao .file-slots,.tool-conciliacao .file-slots.has-comparative{ grid-template-columns:1fr; } .tool-conciliacao .detail-metrics,.tool-conciliacao .metrics{ grid-template-columns:repeat(2,minmax(0,1fr)); } .tool-conciliacao .result-tabs button{ font-size:11px; padding:13px 10px; } .tool-conciliacao .detail-heading h2{ font-size:21px; } .tool-conciliacao .detail-disclosure > summary span{ display:none; } .tool-conciliacao .detail-upload{ padding:16px; } .tool-conciliacao .section-head .sub{ display:none; } }
 @media(max-width:420px){ .tool-conciliacao .metrics{ grid-template-columns:1fr; } .tool-conciliacao .detail-search{ width:100%; } .tool-conciliacao .detail-search input{ width:100%; min-width:0; } .tool-conciliacao .file-slot.lancamentos{ flex-wrap:wrap; } .tool-conciliacao .detail-metric{ padding:14px; } }
@@ -211,7 +195,7 @@
   .tool-conciliacao .card-audit-table td:nth-child(2)::before{ content:'Valor bruto · '; font-family:inherit; font-size:11px; color:var(--gray-500); }
   .tool-conciliacao .card-audit-table td:nth-child(3)::before,.tool-conciliacao .card-audit-table td:nth-child(4)::before{ display:block; margin-bottom:10px; color:var(--gray-500); font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
   .tool-conciliacao .card-audit-table td:nth-child(3)::before{ content:'No sistema'; }
-  .tool-conciliacao .card-audit-table td:nth-child(4)::before{ content:'Na adquirente'; }
+  .tool-conciliacao .card-audit-table td:nth-child(4)::before{ content:'Na Cielo'; }
   .tool-conciliacao .brand-label{ font-size:11px; gap:5px; flex-wrap:wrap; }
   .tool-conciliacao .detail-panel .table-scroll{ max-height:650px; }
 }
