@@ -184,7 +184,13 @@
 
             <div class="form-row">
               <div class="form-group flex-1">
-                <label>CPF</label>
+                <div class="cpf-label-row">
+                  <label for="editCPF">CPF</label>
+                  <label class="cpf-toggle" title="Remove o trecho do CPF somente deste recibo">
+                    <input type="checkbox" id="editSemCPF">
+                    Retirar CPF
+                  </label>
+                </div>
                 <input type="text" id="editCPF" class="form-control" placeholder="000.000.000-00">
               </div>
               <div class="form-group flex-1">
@@ -314,7 +320,7 @@
 
               <!-- CORPO DO TEXTO COM ORTOGRAFIA CORRIGIDA -->
               <div class="ws-body-text">
-                Eu, <strong id="viewVendedor">BRUNA PAULINO</strong>, inscrito no CPF de número: <strong id="viewCPF">095.262.254-81</strong>. 
+                Eu, <strong id="viewVendedor">BRUNA PAULINO</strong><span id="viewCPFTrecho">, inscrito no CPF de número: <strong id="viewCPF">095.262.254-81</strong></span>.
                 Recebi da <span id="viewEmpresa">FARMACIA DO TRABALHADOR DE ALAGOAS</span>, inscrita no CNPJ: 
                 <span id="viewCNPJ">24.920.850.0001-76</span> A importância de R$ <span id="viewValorInline">100,00</span> 
                 (<span id="viewExtenso">cem reais</span>). <span id="viewReferente">Referente a dobra e alimentação no fim de semana</span> 

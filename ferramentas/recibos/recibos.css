@@ -459,6 +459,41 @@
   letter-spacing: .4px;
 }
 
+.tool-recibos .cpf-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tool-recibos .cpf-label-row label {
+  margin-bottom: 0;
+}
+
+.tool-recibos .form-group label.cpf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-recibos .cpf-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.tool-recibos .form-control:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .tool-recibos .form-control {
   width: 100%;
   padding: 9px 12px;

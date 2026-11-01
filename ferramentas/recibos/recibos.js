@@ -101,6 +101,7 @@ window.__tool_init_recibos = function() {
   const editVendedor = document.getElementById('editVendedor');
   const editLoja = document.getElementById('editLoja');
   const editCPF = document.getElementById('editCPF');
+  const editSemCPF = document.getElementById('editSemCPF');
   const editValor = document.getElementById('editValor');
   const editExtenso = document.getElementById('editExtenso');
   const editData = document.getElementById('editData');
@@ -120,6 +121,7 @@ window.__tool_init_recibos = function() {
   const viewValor = document.getElementById('viewValor');
   const viewVendedor = document.getElementById('viewVendedor');
   const viewCPF = document.getElementById('viewCPF');
+  const viewCPFTrecho = document.getElementById('viewCPFTrecho');
   const viewEmpresa = document.getElementById('viewEmpresa');
   const viewCNPJ = document.getElementById('viewCNPJ');
   const viewValorInline = document.getElementById('viewValorInline');
@@ -441,7 +443,17 @@ window.__tool_init_recibos = function() {
     viewSigCPF.textContent = r.cpf || '000.000.000-00';
     viewEmissao.textContent = r.emissao || mestreConfig.emissao;
 
+    aplicarVisibilidadeCPF(r);
     destacarLinhaTabela();
+  }
+
+  // Oculta o trecho "inscrito no CPF de número" e o CPF da assinatura quando o recibo está marcado como sem CPF
+  function aplicarVisibilidadeCPF(r) {
+    const semCPF = !!r.semCPF;
+    editSemCPF.checked = semCPF;
+    editCPF.disabled = semCPF;
+    viewCPFTrecho.style.display = semCPF ? 'none' : '';
+    viewSigCPF.style.display = semCPF ? 'none' : '';
   }
 
   // Sincroniza campos do formulário para o array de recibos conforme o usuário digita
@@ -495,6 +507,15 @@ window.__tool_init_recibos = function() {
     renderizarTabela();
   });
 
+  editSemCPF.addEventListener('change', () => {
+    if (recibosList.length === 0) return;
+    const r = recibosList[currentIndex];
+    r.semCPF = editSemCPF.checked;
+    aplicarVisibilidadeCPF(r);
+    salvarCamposFormulario();
+    renderizarTabela();
+  });
+
   [editVendedor, editLoja, editCPF, editCNPJ, editEmpresa, editReferente, editEmissao].forEach(input => {
     input.addEventListener('input', salvarCamposFormulario);
   });
@@ -527,7 +548,7 @@ window.__tool_init_recibos = function() {
       tr.innerHTML = `
         <td><strong>${idx + 1}</strong></td>
         <td>${r.vendedor || '—'}</td>
-        <td class="font-mono">${r.cpf || '—'}</td>
+        <td class="font-mono">${r.semCPF ? 'Sem CPF' : (r.cpf || '—')}</td>
         <td class="font-mono">R$ ${formatarMoeda(r.valor)}</td>
         <td class="font-mono">${r.data || '—'}</td>
         <td>${r.loja || '—'}</td>
@@ -1088,8 +1109,10 @@ window.__tool_init_recibos = function() {
         children: [
           new TextRun({ text: "Eu, ", size: 26, font: "Calibri" }),
           new TextRun({ text: r.vendedor, bold: true, size: 26, font: "Calibri" }),
-          new TextRun({ text: ", inscrito no CPF de número: ", size: 26, font: "Calibri" }),
-          new TextRun({ text: r.cpf, bold: true, size: 26, font: "Calibri" }),
+          ...(r.semCPF ? [] : [
+            new TextRun({ text: ", inscrito no CPF de número: ", size: 26, font: "Calibri" }),
+            new TextRun({ text: r.cpf, bold: true, size: 26, font: "Calibri" })
+          ]),
           new TextRun({ text: ". Recebi da ", size: 26, font: "Calibri" }),
           new TextRun({ text: r.empresa, size: 26, font: "Calibri" }),
           new TextRun({ text: ", inscrita no CNPJ: ", size: 26, font: "Calibri" }),
@@ -1128,21 +1151,23 @@ window.__tool_init_recibos = function() {
             color: "111111"
           })
         ],
-        spacing: { before: 0, after: 30 }
+        spacing: { before: 0, after: r.semCPF ? 440 : 30 }
       }),
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({
-            text: r.cpf,
-            bold: true,
-            size: 24,
-            font: "Calibri",
-            color: "111111"
-          })
-        ],
-        spacing: { before: 0, after: 440 }
-      }),
+      ...(r.semCPF ? [] : [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new TextRun({
+              text: r.cpf,
+              bold: true,
+              size: 24,
+              font: "Calibri",
+              color: "111111"
+            })
+          ],
+          spacing: { before: 0, after: 440 }
+        })
+      ]),
       // CIDADE E DATA DE EMISSÃO
       new Paragraph({
         alignment: AlignmentType.CENTER,
@@ -1316,14 +1341,14 @@ window.__tool_init_recibos = function() {
           R$ ${valorFmt}
         </div>
         <div style="font-size:17px; line-height:1.8; color:#111111; text-align:justify; margin-bottom:44px; word-break:break-word;">
-          Eu, <strong>${r.vendedor}</strong>, inscrito no CPF de número: <strong>${r.cpf}</strong>. 
+          Eu, <strong>${r.vendedor}</strong>${r.semCPF ? '' : `, inscrito no CPF de número: <strong>${r.cpf}</strong>`}.
           Recebi da ${r.empresa}, inscrita no CNPJ: ${r.cnpj} A importância de R$ ${valorFmt} 
           (${extensoFmt}). ${r.referente} nesta data <strong>${r.data}</strong>.
         </div>
         <div style="text-align:center; margin:46px auto 30px; max-width:520px;">
           <div style="font-size:16px; color:#222222; margin-bottom:12px; letter-spacing:-0.5px; white-space:nowrap;">_______________________________________________________</div>
           <div style="font-size:17px; font-weight:800; color:#111111; text-transform:uppercase; margin-bottom:5px;">${r.vendedor}</div>
-          <div style="font-size:15.5px; font-weight:700; color:#111111;">${r.cpf}</div>
+          ${r.semCPF ? '' : `<div style="font-size:15.5px; font-weight:700; color:#111111;">${r.cpf}</div>`}
         </div>
         <div style="text-align:center; font-size:15.5px; color:#222222; margin-top:30px; font-weight:500;">
           ${r.emissao}
