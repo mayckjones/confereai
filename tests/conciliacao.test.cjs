@@ -103,6 +103,17 @@ test('Cielo preserva bandeira, débito pré-pago, parcelas e líquido', () => {
   const parsed = engine.parseCieloPdfLines(['09/09/2026 16:23 3002105343 13.286.582/0004-09 Débito pré-pago Visa R$ 22,99 -R$ 0,20 R$ 22,79 Aprovada', '09/09/2026 09:01 3002105343 13.286.582/0004-09 Crédito parcelado loja 03x 03 Mastercard R$ 183,97 -R$ 2,94 R$ 181,03 Aprovada', '09/09/2026 11:00 Débito Visa R$ 10,00 Cancelada']);
   assert.equal(parsed.length, 2); assert.equal(parsed[0].bandeira, 'Visa'); assert.equal(parsed[0].modalidade, 'Debito'); assert.equal(parsed[0].valorLiquido, 22.79); assert.equal(parsed[1].parcelas, 3);
 });
+test('venda "Não aprovada" é descartada e não disputa o vínculo com a aprovada', () => {
+  const cielo = engine.parseCieloPdfLines([
+    '2 R$ 19,98 -R$ 0,10 R$ 9,89',
+    '21/10/2026 08:56 1029024402 11.719.336/0001-25 Crédito à vista Elo R$ 9,99 R$ 0,00 R$ 0,00 Não aprovada',
+    '21/10/2026 08:56 1029024402 11.719.336/0001-25 Débito à vista Elo R$ 9,99 -R$ 0,10 R$ 9,89 Aprovada'
+  ]);
+  assert.equal(cielo.length, 1); assert.equal(cielo[0].modalidade, 'Debito');
+  const [caixa] = engine.parseCaixaLines(['1-LOJA 1 JIE', '1230234 Bal 346201 21/10/2026 08:57 3/ 1 106 0,0% Cartao Mag 9,99']);
+  const result = engine.matchCardTransactions([caixa], cielo);
+  assert.equal(result.matched.length, 1); assert.equal(result.sobras.length, 0);
+});
 test('novo cadastro separa POS/TEF e reconhece abreviações, débito e faixas de crédito', () => {
   const lines = engine.parseCardLaunchLines([
     '1-LOJA 1', '28/09/2026',

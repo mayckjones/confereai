@@ -471,6 +471,12 @@ async function parseCielo(file){
   return out;
 }
 
+// "Não aprovada" também contém a palavra APROVADA; ela não pode entrar como venda.
+function isCieloApprovedLine(line){
+  var t = normalizeText(line);
+  return /\bAPROVADA\b/.test(t) && !/\bNAO APROVADA\b/.test(t);
+}
+
 function parseCieloPdfLines(lines){
   var out = [];
   var dateRe = /(\d{2}\/\d{2}\/\d{4})/;
@@ -479,7 +485,7 @@ function parseCieloPdfLines(lines){
 
   lines.forEach(function(line){
     var dateM = line.match(dateRe);
-    if(!dateM || !/\bAPROVADA\b/i.test(line)) return;
+    if(!dateM || !isCieloApprovedLine(line)) return;
     var amounts = [];
     var m;
     var re = new RegExp(moneyRe.source, 'g');
@@ -503,7 +509,7 @@ function parseCieloPdfLines(lines){
   });
   var totalizer = lines.map(function(line){ return line.match(/^(\d+)\s+R\$\s*([\d.]+,\d{2})\s+-?R\$/); }).find(Boolean);
   // O totalizador só serve de controle quando todas as linhas são aprovadas.
-  var hasOtherStatus = lines.some(function(line){ return /\d{2}\/\d{2}\/\d{4}/.test(line) && /R\$/.test(line) && !/\bAPROVADA\b/i.test(line); });
+  var hasOtherStatus = lines.some(function(line){ return /\d{2}\/\d{2}\/\d{4}/.test(line) && /R\$/.test(line) && !isCieloApprovedLine(line); });
   if(totalizer && !hasOtherStatus && (Number(totalizer[1]) !== out.length || cents(parseValorBR(totalizer[2])) !== cents(sumValues(out)))) throw new Error('A leitura da Cielo não fechou com o totalizador. Confira o layout do PDF.');
   return out;
 }
