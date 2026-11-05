@@ -156,6 +156,7 @@
 .tool-conciliacao .coverage-compare dd b{ display:block; font-family:var(--mono); font-size:14px; color:var(--ink); }
 .tool-conciliacao .coverage-compare .is-off dd b{ color:var(--amber); }
 .tool-conciliacao .coverage-compare dd span{ display:block; }
+.tool-conciliacao .coverage-compare dd .coverage-brands{ margin-top:4px; color:var(--gray-500); }
 .tool-conciliacao .coverage-alert .coverage-action{ margin-top:12px; color:var(--ink); }
 .tool-conciliacao .detail-toolbar{ padding:16px 18px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
 .tool-conciliacao .detail-filters{ display:flex; gap:4px; flex-wrap:wrap; }

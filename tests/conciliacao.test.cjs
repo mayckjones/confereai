@@ -208,9 +208,13 @@ test('Lançamentos de outro dia não viram pendências falsas e a inversão dia/
   const message = engine.launchCoverageMessage(audit.coverage);
   assert.match(message.detail, /Nenhum dos 2 registros dos Lançamentos/);
   assert.match(message.detail, /Os Lançamentos são de 11\/04\/2026, mas a Relação e a Cielo são de 04\/11\/2026/);
+  assert.match(message.detail, /As bandeiras também não batem: os Lançamentos têm American Express \(1 venda\) e Mastercard \(1 venda\), que não aparecem na Cielo; a Cielo tem Visa \(2 vendas\), que não aparece nos Lançamentos\./);
   assert.match(message.action, /para 04\/11\/2026/);
   assert.match(message.action, /mês\/dia/);
-  assert.match(message.action, /digite 11\/04\/2026/);
+  assert.match(message.action, /digitar 11\/04\/2026/);
+  assert.match(message.action, /a data acima das linhas deve ser 04\/11\/2026 e os registros devem ficar perto de 1232063 a 1232065/);
+  assert.equal(message.facts[0].bandeiras, 'American Express 1 · Mastercard 1');
+  assert.equal(message.facts[2].bandeiras, 'Visa 2');
   assert.deepEqual(Array.from(message.facts, f => f.label), ['Lançamentos de Cartão', 'Relação de Vendas', 'Cielo']);
   assert.equal(message.facts[0].local, 'Loja 1 · Registros 1204343 a 1204345');
   assert.equal(message.facts[2].local, 'Estab. 1029024402');
@@ -225,6 +229,7 @@ test('Lançamentos de outra loja pedem o relatório da loja certa, sem sugerir i
   assert.match(message.detail, /loja 3 e a Relação é da loja 1/);
   assert.match(message.action, /da loja 1 para 04\/11\/2026/);
   assert.doesNotMatch(message.action, /mês\/dia/);
+  assert.doesNotMatch(message.action, /perto de/);
 });
 
 test('Lançamentos do mesmo dia seguem para a conferência e datas extras são apontadas', () => {

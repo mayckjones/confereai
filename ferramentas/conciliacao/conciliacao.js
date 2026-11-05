@@ -656,7 +656,10 @@ function uniqueSorted(list){
 
 function describeSource(list){
   var registros = list.map(function(t){ return Number(t.registro); }).filter(function(n){ return Number.isFinite(n) && n > 0; });
+  var bandeiras = {};
+  list.forEach(function(t){ if(t.bandeira) bandeiras[t.bandeira] = (bandeiras[t.bandeira] || 0) + 1; });
   return {
+    bandeiras: bandeiras,
     datas: uniqueSorted(list.map(function(t){ return t.data; })),
     lojas: uniqueSorted(list.map(function(t){ return t.loja; })),
     estabelecimentos: uniqueSorted(list.map(function(t){ return t.estabelecimento; })),
@@ -715,11 +718,27 @@ function launchCoverageMessage(coverage){
     action = 'Emita de novo o relatório ' + report + ' para ' + periodo + ' e envie no lugar deste arquivo.';
     if(coverage.swappedDate){
       var first = rel.datas[0], last = rel.datas[rel.datas.length - 1];
-      action += ' O dia e o mês ficaram invertidos: o filtro de período do ERP leu a data como mês/dia. Para conferir ' + (first === last ? formatDateBR(first) + ', digite ' + formatMonthDay(first) : formatDateBR(first) + ' a ' + formatDateBR(last) + ', digite ' + formatMonthDay(first) + ' a ' + formatMonthDay(last)) + ' no filtro.';
+      action += ' O dia e o mês ficaram invertidos (' + formatDateList(lan.datas) + ' × ' + periodo + '): o período foi lido como mês/dia. Tente digitar ' + (first === last ? formatMonthDay(first) : formatMonthDay(first) + ' a ' + formatMonthDay(last)) + ' no filtro.';
     }
   } else {
     reason = 'As datas coincidem, mas nenhum registro dos Lançamentos aparece na Relação.';
     action = 'Confira se os dois relatórios foram emitidos com os mesmos filtros de loja, período e forma de pagamento.';
+  }
+  // Conferência no papel antes do novo envio: mesma data e mesma faixa de registros.
+  if(coverage.sameStore && rel.registroMin !== null){
+    action += ' Antes de enviar, confira no PDF novo: a data acima das linhas deve ser ' + periodo + ' e os registros devem ficar perto de ' + rel.registroMin + ' a ' + rel.registroMax + ', como na Relação.';
+  }
+  function brandCount(names, src){
+    return names.map(function(b){ var n = src.bandeiras[b]; return b + ' (' + n + (n === 1 ? ' venda' : ' vendas') + ')'; }).join(' e ');
+  }
+  var soNosLancamentos = Object.keys(lan.bandeiras).filter(function(b){ return !cie.bandeiras[b]; }).sort();
+  var soNaCielo = Object.keys(cie.bandeiras).filter(function(b){ return !lan.bandeiras[b]; }).sort();
+  var brandEvidence = [];
+  if(cie.vendas && soNosLancamentos.length) brandEvidence.push('os Lançamentos têm ' + brandCount(soNosLancamentos, lan) + (soNosLancamentos.length > 1 ? ', que não aparecem' : ', que não aparece') + ' na Cielo');
+  if(cie.vendas && soNaCielo.length) brandEvidence.push('a Cielo tem ' + brandCount(soNaCielo, cie) + (soNaCielo.length > 1 ? ', que não aparecem' : ', que não aparece') + ' nos Lançamentos');
+  if(brandEvidence.length) reason += ' As bandeiras também não batem: ' + brandEvidence.join('; ') + '.';
+  function brandList(src){
+    return Object.keys(src.bandeiras).sort().map(function(b){ return b + ' ' + src.bandeiras[b]; }).join(' · ');
   }
   function registros(src){
     if(src.registroMin === null) return '';
@@ -730,10 +749,10 @@ function launchCoverageMessage(coverage){
     return [lojas, registros(src)].filter(Boolean).join(' · ');
   }
   var facts = [
-    { label: 'Lançamentos de Cartão', datas: formatDateList(lan.datas), local: where(lan), vendas: lan.vendas + ' vendas', total: fmtBRL(lan.total), off: true },
-    { label: 'Relação de Vendas', datas: periodo, local: where(rel), vendas: rel.vendas + ' vendas', total: fmtBRL(rel.total) }
+    { label: 'Lançamentos de Cartão', datas: formatDateList(lan.datas), local: where(lan), vendas: lan.vendas + ' vendas', total: fmtBRL(lan.total), bandeiras: brandList(lan), off: true },
+    { label: 'Relação de Vendas', datas: periodo, local: where(rel), vendas: rel.vendas + ' vendas', total: fmtBRL(rel.total), bandeiras: '' }
   ];
-  if(cie.vendas) facts.push({ label: 'Cielo', datas: formatDateList(cie.datas), local: where(cie), vendas: cie.vendas + ' vendas aprovadas', total: fmtBRL(cie.total) });
+  if(cie.vendas) facts.push({ label: 'Cielo', datas: formatDateList(cie.datas), local: where(cie), vendas: cie.vendas + ' vendas aprovadas', total: fmtBRL(cie.total), bandeiras: brandList(cie) });
   return {
     title: 'Os Lançamentos enviados não são das mesmas vendas da Relação',
     detail: 'Nenhum dos ' + lan.vendas + ' registros dos Lançamentos aparece entre os ' + rel.vendas + ' da Relação. ' + reason + ' Sem esse vínculo não há hora da venda para localizar o pagamento na Cielo, então bandeira, débito/crédito e parcelas não foram comparados.',
@@ -1166,7 +1185,7 @@ function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.ciel
 
 function coverageAlertHtml(message){
   var facts = message.facts.map(function(f){
-    return '<div' + (f.off ? ' class="is-off"' : '') + '><dt>' + escapeHtml(f.label) + '</dt><dd><b>' + escapeHtml(f.datas) + '</b>' + (f.local ? '<span>' + escapeHtml(f.local) + '</span>' : '') + '<span>' + escapeHtml(f.vendas) + ' · ' + escapeHtml(f.total) + '</span></dd></div>';
+    return '<div' + (f.off ? ' class="is-off"' : '') + '><dt>' + escapeHtml(f.label) + '</dt><dd><b>' + escapeHtml(f.datas) + '</b>' + (f.local ? '<span>' + escapeHtml(f.local) + '</span>' : '') + '<span>' + escapeHtml(f.vendas) + ' · ' + escapeHtml(f.total) + '</span>' + (f.bandeiras ? '<span class="coverage-brands">' + escapeHtml(f.bandeiras) + '</span>' : '') + '</dd></div>';
   }).join('');
   return '<span class="integrity-symbol" aria-hidden="true">!</span><div><strong>' + escapeHtml(message.title) + '</strong><p>' + escapeHtml(message.detail) + '</p><dl class="coverage-compare">' + facts + '</dl><p class="coverage-action"><b>Como resolver:</b> ' + escapeHtml(message.action) + '</p></div>';
 }
