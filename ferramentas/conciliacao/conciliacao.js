@@ -639,8 +639,113 @@ function reconcile(caixaTx, sicrediTx, cieloTx){
   return { divergences: divergences, summary: summary, pairs: resultado };
 }
 
+/* -------------------------------------------------------------------------
+   COBERTURA DOS LANÇAMENTOS
+   Os Lançamentos não têm hora: a venda só chega à Cielo pela Relação, ligada
+   pelo registro. Se nenhum registro é comum, o arquivo é de outro dia ou de
+   outra loja, e comparar bandeira, débito/crédito e parcelas seria inventar.
+   ------------------------------------------------------------------------- */
+function swapDayMonth(iso){
+  var p = String(iso || '').split('-');
+  return p.length === 3 ? p[0] + '-' + p[2] + '-' + p[1] : '';
+}
+
+function uniqueSorted(list){
+  return Array.from(new Set(list.filter(Boolean))).sort();
+}
+
+function describeSource(list){
+  var registros = list.map(function(t){ return Number(t.registro); }).filter(function(n){ return Number.isFinite(n) && n > 0; });
+  return {
+    datas: uniqueSorted(list.map(function(t){ return t.data; })),
+    lojas: uniqueSorted(list.map(function(t){ return t.loja; })),
+    estabelecimentos: uniqueSorted(list.map(function(t){ return t.estabelecimento; })),
+    registroMin: registros.length ? registros.reduce(function(a, b){ return Math.min(a, b); }) : null,
+    registroMax: registros.length ? registros.reduce(function(a, b){ return Math.max(a, b); }) : null,
+    vendas: list.length,
+    total: sumValues(list)
+  };
+}
+
+function assessLaunchCoverage(caixa, groups, cielo){
+  function key(tx, withDate){ return [tx.loja, withDate ? tx.data : '', tx.registro].join('|'); }
+  var saleKeys = new Set(caixa.map(function(s){ return key(s, true); }));
+  var saleRegs = new Set(caixa.map(function(s){ return key(s, false); }));
+  var relacao = describeSource(caixa), lancamentos = describeSource(groups);
+  var foraDoPeriodo = lancamentos.datas.filter(function(d){ return !relacao.datas.includes(d); });
+  var linked = groups.filter(function(g){ return saleKeys.has(key(g, true)); }).length;
+  return {
+    compatible: linked > 0,
+    linked: linked,
+    linkedByRegistro: groups.filter(function(g){ return saleRegs.has(key(g, false)); }).length,
+    relacao: relacao,
+    lancamentos: lancamentos,
+    cielo: describeSource(cielo || []),
+    foraDoPeriodo: foraDoPeriodo,
+    sameStore: !lancamentos.lojas.length || !relacao.lojas.length || lancamentos.lojas.some(function(l){ return relacao.lojas.includes(l); }),
+    // 11/04 × 04/11: o período do relatório foi lido como mês/dia no ERP.
+    swappedDate: lancamentos.datas.length > 0 && foraDoPeriodo.length === lancamentos.datas.length && lancamentos.datas.every(function(d){ return relacao.datas.includes(swapDayMonth(d)); })
+  };
+}
+
+function formatDateList(datas){
+  if(!datas.length) return 'sem data';
+  if(datas.length <= 3) return datas.map(formatDateBR).join(', ');
+  return formatDateBR(datas[0]) + ' a ' + formatDateBR(datas[datas.length - 1]) + ' (' + datas.length + ' dias)';
+}
+
+function formatMonthDay(iso){
+  var p = iso.split('-');
+  return p[1] + '/' + p[2] + '/' + p[0];
+}
+
+function launchCoverageMessage(coverage){
+  var rel = coverage.relacao, lan = coverage.lancamentos, cie = coverage.cielo;
+  var periodo = formatDateList(rel.datas), relLojas = rel.lojas.join(', ');
+  var report = '“Lançamentos de Cartão Magnético por Data”';
+  var reason, action;
+  if(!coverage.sameStore){
+    reason = 'Os Lançamentos são da loja ' + lan.lojas.join(', ') + ' e a Relação é da loja ' + relLojas + '.';
+    action = 'Emita o relatório ' + report + ' da loja ' + relLojas + ' para ' + periodo + ' e envie no lugar deste arquivo.';
+  } else if(coverage.linkedByRegistro > 0){
+    reason = 'Os registros coincidem, mas as datas não: Lançamentos em ' + formatDateList(lan.datas) + ' e Relação em ' + periodo + '.';
+    action = 'Confira o formato de data impresso nos dois relatórios e emita-os novamente com o mesmo período.';
+  } else if(coverage.foraDoPeriodo.length === lan.datas.length){
+    reason = 'Os Lançamentos são de ' + formatDateList(lan.datas) + ', mas a Relação' + (cie.vendas ? ' e a Cielo são' : ' é') + ' de ' + periodo + '.';
+    action = 'Emita de novo o relatório ' + report + ' para ' + periodo + ' e envie no lugar deste arquivo.';
+    if(coverage.swappedDate){
+      var first = rel.datas[0], last = rel.datas[rel.datas.length - 1];
+      action += ' O dia e o mês ficaram invertidos: o filtro de período do ERP leu a data como mês/dia. Para conferir ' + (first === last ? formatDateBR(first) + ', digite ' + formatMonthDay(first) : formatDateBR(first) + ' a ' + formatDateBR(last) + ', digite ' + formatMonthDay(first) + ' a ' + formatMonthDay(last)) + ' no filtro.';
+    }
+  } else {
+    reason = 'As datas coincidem, mas nenhum registro dos Lançamentos aparece na Relação.';
+    action = 'Confira se os dois relatórios foram emitidos com os mesmos filtros de loja, período e forma de pagamento.';
+  }
+  function registros(src){
+    if(src.registroMin === null) return '';
+    return src.registroMin === src.registroMax ? 'Registro ' + src.registroMin : 'Registros ' + src.registroMin + ' a ' + src.registroMax;
+  }
+  function where(src){
+    var lojas = src.lojas.length ? 'Loja ' + src.lojas.join(', ') : src.estabelecimentos.length ? 'Estab. ' + src.estabelecimentos.join(', ') : '';
+    return [lojas, registros(src)].filter(Boolean).join(' · ');
+  }
+  var facts = [
+    { label: 'Lançamentos de Cartão', datas: formatDateList(lan.datas), local: where(lan), vendas: lan.vendas + ' vendas', total: fmtBRL(lan.total), off: true },
+    { label: 'Relação de Vendas', datas: periodo, local: where(rel), vendas: rel.vendas + ' vendas', total: fmtBRL(rel.total) }
+  ];
+  if(cie.vendas) facts.push({ label: 'Cielo', datas: formatDateList(cie.datas), local: where(cie), vendas: cie.vendas + ' vendas aprovadas', total: fmtBRL(cie.total) });
+  return {
+    title: 'Os Lançamentos enviados não são das mesmas vendas da Relação',
+    detail: 'Nenhum dos ' + lan.vendas + ' registros dos Lançamentos aparece entre os ' + rel.vendas + ' da Relação. ' + reason + ' Sem esse vínculo não há hora da venda para localizar o pagamento na Cielo, então bandeira, débito/crédito e parcelas não foram comparados.',
+    action: action,
+    facts: facts
+  };
+}
+
 function buildCardAudit(caixa, launchLines, cielo, pairs){
   var groups = aggregateCardLaunches(launchLines), used = new Set(), rows = [];
+  var coverage = assessLaunchCoverage(caixa, groups, cielo);
+  if(groups.length && !coverage.compatible) return { blocked: true, coverage: coverage, rows: [], groups: groups, lineCount: launchLines.length, internalCount: 0 };
   caixa.forEach(function(sale){
     var internal = groups.filter(function(g){ return g.registro === sale.registro && g.data === sale.data && g.loja === sale.loja; });
     var pair = pairs.matched.concat(pairs.divergValor).find(function(p){ return p.caixa === sale; });
@@ -670,7 +775,7 @@ function buildCardAudit(caixa, launchLines, cielo, pairs){
   groups.filter(function(g){ return !used.has(g); }).forEach(function(g){ rows.push({ sale: null, launch: g, bank: null, issues: ['Lançamento sem venda na Relação'], internalOK: false }); });
   pairs.sobras.forEach(function(b){ rows.push({ sale: null, launch: null, bank: b, issues: ['Venda Cielo sem correspondência segura'], internalOK: false }); });
   rows.sort(function(a,b){ var x = a.sale || a.launch || a.bank, y = b.sale || b.launch || b.bank; return (x.data + (x.hora || '') + (x.registro || '')).localeCompare(y.data + (y.hora || '') + (y.registro || '')); });
-  return { rows: rows, groups: groups, lineCount: launchLines.length, internalCount: rows.filter(function(r){ return r.internalOK; }).length };
+  return { rows: rows, groups: groups, lineCount: launchLines.length, internalCount: rows.filter(function(r){ return r.internalOK; }).length, coverage: coverage };
 }
 
 function cardRangeWarning(row){
@@ -877,7 +982,8 @@ document.getElementById('btnProcess').addEventListener('click', async function()
     state.processedOnce = true;
 
     renderResults();
-    showToast('Conciliação processada com sucesso.');
+    if(state.cardAudit && state.cardAudit.blocked) showToast('Valores conferidos, mas os Lançamentos de Cartão não são das mesmas vendas. Veja a aba Detalhes dos cartões.', true);
+    else showToast('Conciliação processada com sucesso.');
   } catch(err){
     console.error(err);
     showToast('Erro ao processar: ' + err.message, true);
@@ -918,7 +1024,14 @@ function renderResults(){
     statusEl.className = 'status-badge bad';
     statusSub.textContent = state.divergences.length + ' pendência(s) encontrada(s)';
   }
-  if(state.cardAudit){
+  if(state.cardAudit && state.cardAudit.blocked){
+    statusEl.textContent = 'Reenviar lançamentos';
+    statusEl.className = 'status-badge review';
+    statusSub.textContent = (state.divergences.length ? state.divergences.length + ' divergência(s) de valor. ' : 'Valores conciliados. ') + 'Cartões não conferidos: os Lançamentos são de outro dia ou loja.';
+    document.getElementById('analysisScope').textContent = 'Valores conferidos · Lançamentos incompatíveis com a Relação';
+    document.getElementById('valueEmptyNote').textContent = 'Os valores batem, mas os Lançamentos enviados não são das mesmas vendas. Veja a aba Detalhes dos cartões.';
+    renderCardAudit();
+  } else if(state.cardAudit){
     var pending = state.cardAudit.rows.filter(function(r){ return r.issues.length; }).length;
     if(pending){ statusEl.textContent = 'Conferir cartões'; statusEl.className = 'status-badge review'; statusSub.textContent = pending + ' venda(s) com pendências nos detalhes'; }
     document.getElementById('valueEmptyNote').textContent = pending ? 'Os valores batem. Há ' + pending + ' venda(s) para revisar na aba Detalhes dos cartões.' : 'Valores e dados dos cartões conferidos nos relatórios enviados.';
@@ -1051,8 +1164,24 @@ function buildCardChannelGroups(audit){
 
 function cardGroups(){ return buildCardGroups(state.cardAudit, state.parsed.cielo); }
 
+function coverageAlertHtml(message){
+  var facts = message.facts.map(function(f){
+    return '<div' + (f.off ? ' class="is-off"' : '') + '><dt>' + escapeHtml(f.label) + '</dt><dd><b>' + escapeHtml(f.datas) + '</b>' + (f.local ? '<span>' + escapeHtml(f.local) + '</span>' : '') + '<span>' + escapeHtml(f.vendas) + ' · ' + escapeHtml(f.total) + '</span></dd></div>';
+  }).join('');
+  return '<span class="integrity-symbol" aria-hidden="true">!</span><div><strong>' + escapeHtml(message.title) + '</strong><p>' + escapeHtml(message.detail) + '</p><dl class="coverage-compare">' + facts + '</dl><p class="coverage-action"><b>Como resolver:</b> ' + escapeHtml(message.action) + '</p></div>';
+}
+
 function renderCardAudit(){
   var audit = state.cardAudit, rows = audit.rows;
+  var blocked = !!audit.blocked, alertEl = document.getElementById('cardCoverageAlert');
+  alertEl.hidden = !blocked;
+  document.getElementById('cardAuditContent').hidden = blocked;
+  document.getElementById('btnExportDetails').disabled = blocked;
+  if(blocked){
+    document.getElementById('cardTabCount').textContent = '!';
+    alertEl.innerHTML = coverageAlertHtml(launchCoverageMessage(audit.coverage));
+    return;
+  }
   var pending = rows.filter(function(r){ return r.issues.length; });
   document.getElementById('cardTabCount').textContent = pending.length;
   var metrics = [
@@ -1063,9 +1192,10 @@ function renderCardAudit(){
   ];
   document.getElementById('cardMetrics').innerHTML = metrics.map(function(m){ return '<div class="detail-metric ' + m[3] + '"><span>' + m[0] + '</span><strong>' + m[1] + '</strong><small>' + m[2] + '</small></div>'; }).join('');
   var integrityOK = audit.internalCount === state.parsed.caixa.length && audit.groups.length === state.parsed.caixa.length && !rows.some(function(r){ return r.issues.some(function(i){ return /internas|interno|registro|Relação|cadastro|faixa/.test(i); }); });
+  var outside = audit.coverage && audit.coverage.foraDoPeriodo.length ? ' Lançamentos com data fora da Relação: ' + formatDateList(audit.coverage.foraDoPeriodo) + '.' : '';
   var banner = document.getElementById('cardIntegrity');
   banner.className = 'integrity-banner ' + (integrityOK ? 'good' : 'warn');
-  banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos vinculados' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas classificadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros vinculados à Relação. Total da Relação: ' + fmtBRL(sumValues(state.parsed.caixa)) + '.</p></div>';
+  banner.innerHTML = '<span class="integrity-symbol">' + (integrityOK ? '✓' : '!') + '</span><div><strong>' + (integrityOK ? 'Relatórios internos vinculados' : 'Confira a cobertura dos relatórios internos') + '</strong><p>' + audit.lineCount + ' linhas de parcelas → ' + audit.groups.length + ' vendas classificadas. ' + audit.internalCount + ' de ' + state.parsed.caixa.length + ' registros vinculados à Relação. Total da Relação: ' + fmtBRL(sumValues(state.parsed.caixa)) + '.' + escapeHtml(outside) + '</p></div>';
   document.getElementById('cardGroupBody').innerHTML = cardGroups().map(function(g){ return '<tr><td>' + escapeHtml(g.categoria) + '</td><td class="num">' + g.qtdSistema + '</td><td class="num">' + fmtBRL(g.sistema / 100) + '</td><td class="num">' + g.qtdCielo + '</td><td class="num">' + fmtBRL(g.cielo / 100) + '</td><td class="num ' + (g.sistema === g.cielo ? 'diff-zero' : 'diff-neg') + '">' + fmtBRL((g.sistema - g.cielo) / 100) + '</td></tr>'; }).join('');
   var grossSystem = sumValues(state.parsed.caixa), grossBank = sumValues(state.parsed.cielo), netBank = sumValues(state.parsed.cielo, 'valorLiquido');
   var bankHasNet = state.parsed.cielo.every(function(t){ return Number.isFinite(t.valorLiquido); });
@@ -1074,7 +1204,7 @@ function renderCardAudit(){
 }
 
 function renderCardRows(){
-  if(!state.cardAudit) return;
+  if(!state.cardAudit || state.cardAudit.blocked) return;
   var query = normalizeText(document.getElementById('cardSearch').value);
   var rows = state.cardAudit.rows.filter(function(r){
     var filterOK = state.cardFilter === 'all' || (state.cardFilter === 'pending' ? r.issues.length > 0 : !!r[state.cardFilter]);
@@ -1103,7 +1233,7 @@ document.querySelectorAll('[data-card-filter]').forEach(function(button){ button
 document.getElementById('cardSearch').addEventListener('input', renderCardRows);
 
 document.getElementById('btnExportDetails').addEventListener('click', function(){
-  if(!state.cardAudit) return;
+  if(!state.cardAudit || state.cardAudit.blocked) return;
   var rows = state.cardAudit.rows.map(function(r){ var tx = r.sale || r.launch || r.bank, rangeWarning = cardRangeWarning(r); return {
     'Data': tx.data ? formatDateBR(tx.data) : '', 'Registro': (r.sale || r.launch || {}).registro || '',
     'Cx/Tu': r.sale && r.sale.caixaTurno || '', 'Código vendedor': r.sale && r.sale.codigoVendedor || '',

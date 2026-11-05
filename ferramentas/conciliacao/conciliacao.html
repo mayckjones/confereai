@@ -176,6 +176,8 @@
 
     <div id="view-cards" role="tabpanel" aria-labelledby="tab-cards" hidden>
       <div class="detail-heading"><div><span class="detail-eyebrow">SISTEMA × CIELO</span><h2>Cada cartão, conferido lado a lado.</h2><p>Bandeira, modalidade e parcelas comparadas em cada venda identificada.</p></div><button class="btn btn-ghost" id="btnExportDetails">Exportar detalhes (.xlsx)</button></div>
+      <div class="coverage-alert" id="cardCoverageAlert" role="alert" hidden></div>
+      <div id="cardAuditContent">
       <div class="detail-metrics" id="cardMetrics"></div>
       <div class="integrity-banner" id="cardIntegrity" role="status"></div>
       <div class="panel detail-panel">
@@ -191,6 +193,7 @@
       <details class="detail-disclosure"><summary>Totais por bandeira e modalidade <span>Comparar distribuição</span></summary><div class="table-scroll"><table><thead><tr><th>Categoria</th><th class="num">Vendas sistema</th><th class="num">Sistema</th><th class="num">Vendas Cielo</th><th class="num">Cielo</th><th class="num">Diferença</th></tr></thead><tbody id="cardGroupBody"></tbody></table></div></details>
       <details class="detail-disclosure"><summary>Totais brutos e taxas <span>Conferência complementar</span></summary><div id="cardNetSummary" class="net-summary"></div><p class="detail-footnote">O bruto do sistema vem da Relação de Vendas; as taxas vêm da Cielo. O relatório da Cielo não confirma o depósito bancário. Devoluções, cancelamentos e recebimentos precisam de seus próprios relatórios.</p></details>
       <p class="detail-footnote">Os novos cartões POS e TEF são identificados pelo código e descrição do cadastro. “1X” e “2X - 3X” indicam a faixa cadastrada; a coluna Parc. informa as parcelas efetivas da venda. A Cielo não identifica POS ou TEF neste relatório, então esse canal vem apenas do sistema.</p>
+      </div>
     </div>
 
     <div id="view-source" role="tabpanel" aria-labelledby="tab-source" hidden>

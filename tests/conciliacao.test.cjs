@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile, launchCoverageMessage }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -175,6 +175,77 @@ test('indicadores ficam alinhados e somente divergências recebem destaque', () 
   assert.match(engine.brandLabel('Hipercard', false), /hipercard-shape/);
   assert.match(engine.brandLabel('Hipercard', true), /brand-label field-warning/);
 });
+// Amostra real de 04/11/2026: o filtro "04/11/2026" dos Lançamentos foi lido
+// como 11 de abril, enquanto Relação e Cielo são de 4 de novembro.
+const relacaoNov = engine.parseCaixaLines([
+  '1-LOJA 1 JIE',
+  '1232063 Bal 347920 04/11/2026 06:54 3/ 1 106 0,0% Cartao Mag 13,99',
+  '1232065 Bal 347922 04/11/2026 07:02 3/ 1 106 0,0% Cartao Mag 27,98'
+]);
+const cieloNov = engine.parseCieloPdfLines([
+  '04/11/2026 06:53 1029024402 11.719.336/0001-25 Crédito à vista Visa R$ 13,99 -R$ 0,25 R$ 13,74 Aprovada',
+  '04/11/2026 07:01 1029024402 11.719.336/0001-25 Débito à vista Visa R$ 27,98 -R$ 0,25 R$ 27,73 Aprovada'
+]);
+const lancamentosAbr = engine.parseCardLaunchLines([
+  'Periodo: 04/11/2026 a 04/11/2026 ** Loja: 1-LOJA 1 JIE', '11/04/2026', '1 - LOJA 1 JIE',
+  '4 - TEF AMEX 1X 1204345 1 62,94 2,52 61,35 000000002',
+  '1 - TEF MASTER 1X 1204343 1 48,99 1,99 48,02 000000001',
+  'Total Geral...: 2 111,93'
+]);
+
+test('Lançamentos de outro dia não viram pendências falsas e a inversão dia/mês é explicada', () => {
+  const result = engine.reconcile(relacaoNov, [], cieloNov);
+  assert.equal(result.pairs.matched.length, 2);
+  const audit = engine.buildCardAudit(relacaoNov, lancamentosAbr, cieloNov, result.pairs);
+  assert.equal(audit.blocked, true);
+  assert.equal(audit.rows.length, 0);
+  assert.equal(audit.coverage.linked, 0);
+  assert.equal(audit.coverage.swappedDate, true);
+  assert.deepEqual(Array.from(audit.coverage.lancamentos.datas), ['2026-04-11']);
+  assert.equal(audit.coverage.lancamentos.registroMin, 1204343);
+  assert.equal(audit.coverage.relacao.registroMax, 1232065);
+
+  const message = engine.launchCoverageMessage(audit.coverage);
+  assert.match(message.detail, /Nenhum dos 2 registros dos Lançamentos/);
+  assert.match(message.detail, /Os Lançamentos são de 11\/04\/2026, mas a Relação e a Cielo são de 04\/11\/2026/);
+  assert.match(message.action, /para 04\/11\/2026/);
+  assert.match(message.action, /mês\/dia/);
+  assert.match(message.action, /digite 11\/04\/2026/);
+  assert.deepEqual(Array.from(message.facts, f => f.label), ['Lançamentos de Cartão', 'Relação de Vendas', 'Cielo']);
+  assert.equal(message.facts[0].local, 'Loja 1 · Registros 1204343 a 1204345');
+  assert.equal(message.facts[2].local, 'Estab. 1029024402');
+});
+
+test('Lançamentos de outra loja pedem o relatório da loja certa, sem sugerir inversão de data', () => {
+  const outraLoja = lancamentosAbr.map(line => ({ ...line, loja: '3', data: '2026-11-04' }));
+  const audit = engine.buildCardAudit(relacaoNov, outraLoja, cieloNov, engine.reconcile(relacaoNov, [], cieloNov).pairs);
+  assert.equal(audit.blocked, true);
+  assert.equal(audit.coverage.sameStore, false);
+  const message = engine.launchCoverageMessage(audit.coverage);
+  assert.match(message.detail, /loja 3 e a Relação é da loja 1/);
+  assert.match(message.action, /da loja 1 para 04\/11\/2026/);
+  assert.doesNotMatch(message.action, /mês\/dia/);
+});
+
+test('Lançamentos do mesmo dia seguem para a conferência e datas extras são apontadas', () => {
+  const mesmoDia = engine.parseCardLaunchLines([
+    '1-LOJA 1 JIE', '04/11/2026',
+    '2 - TEF VISA 1X 1232063 1 13,99 1,78 13,74 000000001',
+    '6 - TEF VISA DÉBITO 1232065 1 27,98 0,89 27,73 000000002',
+    '05/11/2026',
+    '6 - TEF VISA DÉBITO 1232300 1 10,00 0,89 9,91 000000003'
+  ]);
+  const result = engine.reconcile(relacaoNov, [], cieloNov);
+  const audit = engine.buildCardAudit(relacaoNov, mesmoDia, cieloNov, result.pairs);
+  assert.notEqual(audit.blocked, true);
+  assert.equal(audit.coverage.linked, 2);
+  assert.deepEqual(Array.from(audit.coverage.foraDoPeriodo), ['2026-11-05']);
+  const sales = audit.rows.filter(row => row.sale);
+  assert.equal(sales.length, 2);
+  assert.ok(sales.every(row => row.issues.length === 0), JSON.stringify(sales.map(row => row.issues)));
+  assert.ok(audit.rows.some(row => !row.sale && row.issues.includes('Lançamento sem venda na Relação')));
+});
+
 test('PIX continua conciliando recebimentos no próximo dia útil', () => {
   const result = engine.reconcile([{ ...sale(10, null), data: '2026-09-12', modalidade: 'PIX' }], [{ ...bank(10, null), data: '2026-09-14', modalidade: 'PIX', origem: 'Sicredi' }], []);
   assert.equal(result.divergences.length, 0);
