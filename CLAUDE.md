@@ -1,6 +1,6 @@
 # ConfereAI
 
-Ferramentas de conferência da Farmácia do Trabalhador de Alagoas (conciliação Caixa × Cielo/PIX, recibos). Site estático em HTML, CSS e JavaScript puro, sem build.
+Ferramentas de conferência da Farmácia do Trabalhador de Alagoas (conciliação Caixa × Cielo/PIX, recibos, precificação/etiquetas de preço). Site estático em HTML, CSS e JavaScript puro, sem build. Cada ferramenta fica em `ferramentas/<id>/` e é registrada em `ferramentas/registry.js` e no menu do `index.html`.
 
 ## Testes
 

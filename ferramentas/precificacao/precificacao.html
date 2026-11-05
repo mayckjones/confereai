@@ -1,0 +1,135 @@
+<!-- ConfereAI — Ferramenta: Precificação (etiquetas de preço 80 mm) -->
+
+<div class="tool-precificacao">
+
+  <div class="section-head">
+    <h2>1. Planilha de produtos</h2>
+    <span class="sub">Uma linha por produto · .xlsx, .xls ou .csv</span>
+  </div>
+
+  <div class="prec-import">
+    <div class="dropzone" id="precDropzone" tabindex="0" role="button" aria-label="Enviar planilha de produtos">
+      <div class="dz-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h3>Arraste a planilha aqui</h3>
+      <p>ou <span class="browse">clique para selecionar</span>. As colunas da planilha modelo são reconhecidas automaticamente.</p>
+      <input type="file" id="precFileInput" accept=".xlsx,.xls,.csv" hidden>
+    </div>
+
+    <div class="prec-template">
+      <span class="prec-eyebrow">Planilha modelo</span>
+      <h3>Preencha e envie</h3>
+      <p>Descrição, código, código de barras, preço De, preço Por e quantas etiquetas imprimir de cada produto.</p>
+      <div class="prec-template-actions">
+        <button class="btn btn-ghost" id="btnPrecModelo" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Baixar planilha modelo
+        </button>
+        <button class="btn btn-ghost" id="btnPrecManual" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Digitar sem planilha
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="prec-file" id="precFile" hidden>
+    <span class="prec-file-icon">XLS</span>
+    <div class="prec-file-body"><span>Planilha importada</span><strong id="precFileName"></strong></div>
+    <button class="prec-remove" id="btnPrecRemoverArquivo" type="button" title="Remover planilha" aria-label="Remover planilha">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <div id="precWork" hidden>
+
+    <div class="section-head">
+      <h2>2. Conferir e editar</h2>
+      <span class="sub" id="precSummary"></span>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Produtos</h3>
+        <span class="count" id="precCount">0 produtos</span>
+      </div>
+      <div class="table-scroll">
+        <table class="prec-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Descrição</th>
+              <th>Código</th>
+              <th>Código de barras</th>
+              <th class="num">De (R$)</th>
+              <th class="num">Por (R$)</th>
+              <th class="num">Qtd.</th>
+              <th>Situação</th>
+              <th><span class="sr-only">Remover</span></th>
+            </tr>
+          </thead>
+          <tbody id="precBody"></tbody>
+        </table>
+      </div>
+      <div class="prec-table-foot">
+        <button class="btn btn-ghost prec-btn-sm" id="btnPrecAdd" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Adicionar produto
+        </button>
+        <span class="prec-foot-hint">Sem preço De, a etiqueta sai só com o preço. Quantidade 0 não imprime.</span>
+        <button class="btn btn-danger-ghost prec-btn-sm" id="btnPrecLimpar" type="button">Limpar tudo</button>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>3. Etiquetas para impressão</h2>
+      <span class="sub">Folha de 80 × 297 mm · até 6 etiquetas por folha</span>
+    </div>
+
+    <div class="prec-output">
+      <div class="prec-side">
+        <div class="prec-card">
+          <span class="prec-eyebrow">Modelo</span>
+          <div class="prec-models" role="radiogroup" aria-label="Modelo da etiqueta">
+            <label class="prec-model">
+              <input type="radio" name="precModelo" value="cor">
+              <span class="prec-heart cor" aria-hidden="true"></span>
+              <span><strong>Colorida</strong><small>Logo vermelho</small></span>
+            </label>
+            <label class="prec-model">
+              <input type="radio" name="precModelo" value="pb">
+              <span class="prec-heart pb" aria-hidden="true"></span>
+              <span><strong>Preto e branco</strong><small>Para impressora térmica</small></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="prec-card">
+          <span class="prec-eyebrow">Impressão</span>
+          <dl class="prec-sheets" id="precSheets"></dl>
+          <div class="prec-actions">
+            <button class="btn btn-primary" id="btnPrecBaixar" type="button" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+              Baixar PDF
+            </button>
+            <button class="btn btn-ghost" id="btnPrecImprimir" type="button" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Abrir para imprimir
+            </button>
+          </div>
+          <p class="prec-note">Na impressão, escolha <b>tamanho real (100%)</b>, sem "Ajustar à página". A última folha sai só do tamanho das etiquetas que sobraram.</p>
+        </div>
+      </div>
+
+      <div class="prec-preview">
+        <iframe id="precPreview" title="Prévia do PDF das etiquetas" hidden></iframe>
+        <div class="prec-preview-empty" id="precPreviewEmpty">
+          <h4>Nenhuma etiqueta para imprimir</h4>
+          <p id="precPreviewMsg">Preencha a descrição e o preço Por de pelo menos um produto.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
