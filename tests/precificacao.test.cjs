@@ -9,7 +9,7 @@ function loadEngine(){
   const context = vm.createContext({ window: {}, console });
   const source = fs.readFileSync(path.join(root, 'ferramentas/precificacao/precificacao.js'), 'utf8');
   const engine = source.slice(0, source.indexOf('/* ======================== INTERFACE'));
-  vm.runInContext(engine + '\nreturn { LAYOUT, TEMPLATE_HEADERS, TEMPLATE_EXAMPLES, parseSheetMatrix, parsePrice, formatPrice, gtinValido, analyzeRow, expandLabels, paginate, pageHeightMm, summarize, fitText, textWidth, pdfString, drawLabel, drawPage, buildPdf }; };', context);
+  vm.runInContext(engine + '\nreturn { LAYOUT, TEMPLATE_HEADERS, TEMPLATE_EXAMPLES, TEMPLATE_INSTRUCTIONS, parseSheetMatrix, parsePrice, formatPrice, gtinValido, analyzeRow, expandLabels, paginate, pageHeightMm, summarize, fitText, textWidth, pdfString, drawLabel, drawPage, buildPdf }; };', context);
   return context.window.__tool_init_precificacao();
 }
 module.exports = { loadEngine };
@@ -137,6 +137,41 @@ test('textos especiais são codificados em WinAnsi e textos longos cabem na etiq
   assert.ok(tamanho(caro) < 28);
   assert.ok(engine.textWidth('R$1.149,90', true, tamanho(caro)) <= engine.LAYOUT.larguraPreco * 72 / 25.4);
   assert.equal(tamanho(comum), 28);
+});
+
+// Leitor mínimo de .xlsx (zip + XML) só para conferir a planilha modelo.
+function readZipEntry(file, entryName){
+  const buf = fs.readFileSync(file), eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let p = buf.readUInt32LE(eocd + 16);
+  for(let i = 0; i < buf.readUInt16LE(eocd + 10); i++){
+    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), local = buf.readUInt32LE(p + 42);
+    if(buf.toString('utf8', p + 46, p + 46 + nameLen) === entryName){
+      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28), data = buf.subarray(start, start + size);
+      return (method === 8 ? require('node:zlib').inflateRawSync(data) : data).toString('utf8');
+    }
+    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  throw new Error('não encontrou ' + entryName);
+}
+function sheetMatrix(xml){
+  const matrix = [], unescape = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  for(const m of xml.matchAll(/<c r="([A-Z])(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/c>)/g)){
+    const inner = m[3] || '', v = (inner.match(/<v>([^<]*)<\/v>/) || [])[1];
+    const row = (matrix[Number(m[2]) - 1] = matrix[Number(m[2]) - 1] || []);
+    row[m[1].charCodeAt(0) - 65] = v !== undefined ? Number(v) : unescape([...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t => t[1]).join(''));
+  }
+  return Array.from(matrix, row => Array.from(row || [], c => c === undefined ? '' : c));
+}
+
+test('planilha modelo para baixar tem as colunas e os exemplos que a ferramenta lê', () => {
+  const file = path.join(root, 'ferramentas/precificacao/modelo_etiquetas_preco.xlsx');
+  const matrix = sheetMatrix(readZipEntry(file, 'xl/worksheets/sheet1.xml'));
+  assert.deepEqual(matrix[0], Array.from(engine.TEMPLATE_HEADERS));
+  const { rows } = engine.parseSheetMatrix(matrix);
+  assert.equal(rows.length, engine.TEMPLATE_EXAMPLES.length);
+  assert.deepEqual({ ...rows[0] }, { descricao: 'FRALDA INFANTIL G C/30', codigo: '42118', ean: '7896100542037', de: '59,90', por: '47,90', qtd: '1' });
+  assert.match(readZipEntry(file, 'xl/workbook.xml'), /<sheet name="Etiquetas"[\s\S]*<sheet name="Como preencher"/);
+  assert.match(readZipEntry(file, 'xl/worksheets/sheet2.xml'), /QUANTIDADE:/);
 });
 
 test('PDF gerado tem estrutura válida, uma folha por 6 etiquetas e logo único', () => {

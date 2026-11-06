@@ -453,7 +453,29 @@ async function importarArquivo(file){
   }
 }
 
-el('btnPrecModelo').addEventListener('click', function(){
+var MODELO_ARQUIVO = 'modelo_etiquetas_preco.xlsx';
+
+function baixarArquivo(blob, nome){
+  var url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+
+// Baixa a planilha formatada (gerada por scripts/gerar-modelo-etiquetas.cjs).
+// Se o arquivo não estiver disponível, monta uma versão simples no navegador.
+el('btnPrecModelo').addEventListener('click', async function(){
+  try{
+    var resp = await fetch('ferramentas/precificacao/' + MODELO_ARQUIVO, { cache: 'no-cache' });
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    baixarArquivo(new Blob([await resp.arrayBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), MODELO_ARQUIVO);
+  }catch(err){
+    console.warn('Planilha modelo pronta indisponível; gerando no navegador.', err);
+    gerarModeloNoNavegador();
+  }
+});
+
+function gerarModeloNoNavegador(){
   var aoa = [TEMPLATE_HEADERS].concat(TEMPLATE_EXAMPLES);
   var ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols'] = [{ wch: 40 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 13 }];
@@ -463,8 +485,8 @@ el('btnPrecModelo').addEventListener('click', function(){
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Etiquetas');
   XLSX.utils.book_append_sheet(wb, info, 'Como preencher');
-  XLSX.writeFile(wb, 'modelo_etiquetas_preco.xlsx');
-});
+  XLSX.writeFile(wb, MODELO_ARQUIVO);
+}
 
 el('btnPrecManual').addEventListener('click', function(){
   if(!state.rows.length){ state.rows = [novaLinha()]; state.fileName = ''; }

@@ -10,6 +10,8 @@ node --test "tests/*.test.cjs"
 
 Rode os testes depois de qualquer alteração em `ferramentas/` ou `js/`. Se algum falhar, informe a falha e não sugira commit.
 
+Se mudar as colunas, exemplos ou instruções da planilha de etiquetas (`TEMPLATE_*` em `ferramentas/precificacao/precificacao.js`), gere de novo a planilha modelo com `node scripts/gerar-modelo-etiquetas.cjs`.
+
 ## Título e descrição do commit ao final de toda alteração
 
 Sempre que uma resposta alterar arquivos deste repositório, termine com o título e a descrição do commit, prontos para colar no GitHub Desktop (campos "Summary" e "Description"). Não precisa esperar o pedido. Se nada foi alterado na resposta, não inclua.
