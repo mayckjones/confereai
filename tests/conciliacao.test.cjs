@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile, launchCoverageMessage }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile, launchCoverageMessage, linkLaunches, assignCieloStores, reconcileStores, storeName }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -249,6 +249,180 @@ test('Lançamentos do mesmo dia seguem para a conferência e datas extras são a
   assert.equal(sales.length, 2);
   assert.ok(sales.every(row => row.issues.length === 0), JSON.stringify(sales.map(row => row.issues)));
   assert.ok(audit.rows.some(row => !row.sale && row.issues.includes('Lançamento sem venda na Relação')));
+});
+
+// Amostra de 29/09/2026 com várias lojas: Relação e Lançamentos com todas as
+// lojas e uma Cielo por loja. Loja 4 = código 7 e Loja 5 = código 6 no sistema.
+// Listas vindas do motor (outro contexto vm) são comparadas como dados simples.
+const same = (actual, expected) => assert.deepEqual(JSON.parse(JSON.stringify(actual)), expected);
+const relacaoGeral = [
+  '1-LOJA 1 JIE',
+  '1227272 Bal 343418 29/09/2026 07:55 3/ 1 106 0,0% Cartao Mag 16,98',
+  '1227327 Dom 343470 29/09/2026 17:42 3/ 2 35 0,0% Cartao Mag 154,96',
+  '2-LOJA 2 MEG 1',
+  '537784 Bal 230644 29/09/2026 07:32 2/ 1 103 0,0% Cartao Mag 7,99',
+  '6-LOJA 6 MEG 5',
+  '349277 Bal 243609 29/09/2026 07:16 1/ 1 113 0,0% Cartao Mag 40,98',
+  '349379 Dom 243700 29/09/2026 17:55 1/ 2 63 0,0% Cartao Mag 108,97',
+  '349417 Dom 243736 29/09/2026 21:53 1/ 2 35 0,0% Cartao Mag 5,99',
+  '7-LOJA 7 MEG 4',
+  '3888 Bal 3623 29/09/2026 07:43 1/ 1 117 0,0% Cartao Mag 11,99',
+  '3932 Bal 3664 29/09/2026 13:09 1/ 1 117 0,0% Cartao Mag 29,96',
+  'Cartao Mag 60,00'
+];
+const lancamentosGerais = [
+  'Periodo: 29/09/2026 a 29/09/2026 ** Loja: <Todas>', '29/09/2026',
+  '1 - LOJA 1 JIE',
+  '26 - POS VISA 1X 1227327 1 154,96 1,39 152,81 02484223',
+  '1 - TEF MASTER 1X 1227272 1 16,98 1,99 16,64 000500004',
+  '2 - LOJA 2 MEG 1',
+  '8 - POS AMEX 1X 537784 1 7,99 2,12 7,82 02514654',
+  '6 - LOJA 6 MEG 5',
+  '30 - POS VISA DÉBITO 349379 1 108,97 0,85 108,04 161699',
+  '30 - POS VISA DÉBITO 349417 1 5,99 0,85 5,94 5226',
+  '6 - TEF VISA DÉBITO 349277 1 40,98 0,85 40,63 000500001',
+  '7 - LOJA 7 MEG 4',
+  '8 - POS AMEX 1X 3932 1 60,00 2,12 58,73 337265',
+  '8 - POS AMEX 1X 3932 1 60,00 2,12 58,73 337265',
+  '8 - POS AMEX 1X 3932 1 29,96 2,12 29,32 02484224',
+  '8 - POS AMEX 1X 3932 1 29,96 2,12 29,32 02484224',
+  '1 - TEF MASTER 1X 3888 1 11,99 1,39 11,82 000500001'
+];
+const cieloLoja1 = ['29/09/2026 07:54 1029024402 11.719.336/0001-25 Débito à vista Elo R$ 16,98 -R$ 0,17 R$ 16,81 Aprovada'];
+const cieloLoja4 = ['29/09/2026 07:42 3002105343 13.286.582/0004-09 Crédito à vista Mastercard R$ 11,99 -R$ 0,17 R$ 11,82 Aprovada'];
+const cieloLoja5 = [
+  '29/09/2026 07:16 2800327299 13.286.582/0002-47 Débito à vista Visa R$ 40,98 -R$ 0,32 R$ 40,66 Aprovada',
+  '29/09/2026 16:42 2800327299 13.286.582/0002-47 Crédito à vista Visa R$ 154,96 -R$ 2,43 R$ 152,53 Aprovada',
+  '29/09/2026 12:58 2800327299 13.286.582/0002-47 Débito à vista Elo R$ 60,00 -R$ 0,56 R$ 59,44 Aprovada',
+  '29/09/2026 12:59 2800327299 13.286.582/0002-47 Crédito à vista Mastercard R$ 29,96 -R$ 0,47 R$ 29,49 Aprovada',
+  '29/09/2026 17:08 2800327299 13.286.582/0002-47 Débito à vista Visa R$ 118,97 -R$ 0,92 R$ 118,05 Aprovada',
+  '29/09/2026 07:20 2800327299 13.286.582/0002-47 Crédito à vista American Express R$ 7,99 -R$ 0,17 R$ 7,82 Aprovada'
+];
+const geral = () => ({ caixa: engine.parseCaixaLines(relacaoGeral), lanc: engine.parseCardLaunchLines(lancamentosGerais) });
+const cielo = (...sets) => engine.parseCieloPdfLines([].concat(...sets));
+
+test('cada Cielo é ligada à loja pelo estabelecimento; Loja 4 e Loja 5 têm outro código no sistema', () => {
+  const { caixa } = geral();
+  const assigned = engine.assignCieloStores(caixa, cielo(cieloLoja1, cieloLoja4, cieloLoja5));
+  same(Array.from(new Set(assigned.map(t => t.loja))), ['1', '7', '6']);
+  assert.equal(engine.storeName('7'), 'Loja 4');
+  assert.equal(engine.storeName('6'), 'Loja 5');
+  const desconhecida = cielo(['29/09/2026 07:54 9999999999 11.719.336/0001-25 Débito à vista Elo R$ 16,98 -R$ 0,17 R$ 16,81 Aprovada']);
+  assert.throws(() => engine.assignCieloStores(caixa, desconhecida), /9999999999 não está ligado a nenhuma loja/);
+  // Loja única, como antes: o estabelecimento fora do cadastro vale para a loja da Relação.
+  assert.equal(engine.assignCieloStores(caixa.filter(t => t.loja === '1'), desconhecida)[0].loja, '1');
+});
+
+test('6 arquivos: vendas POS das lojas 1 e 4 caem na Cielo da Loja 5 e ficam explícitas', () => {
+  const { caixa, lanc } = geral();
+  const r = engine.reconcileStores(caixa, cielo(cieloLoja1, cieloLoja4, cieloLoja5), lanc);
+  assert.equal(r.multi, true);
+  same(r.views.map(v => v.nome), ['Loja 1', 'Loja 4', 'Loja 5']);
+  const [l1, l4, l5] = r.views;
+
+  assert.equal(l1.divergences.length, 0);
+  assert.equal(l1.diferencaFinal, 0);
+  assert.equal(l1.posFora.length, 1);
+  assert.equal(l1.posFora[0].confidence, 'entrega');
+  assert.equal(l1.posFora[0].banco.loja, '6');
+  same(l1.summary.map(s => s.modalidade), ['Caixa × Cielo · Loja 1', 'Vendas POS desta loja recebidas na Cielo da Loja 5', 'Total separando as vendas POS']);
+  assert.equal(l1.summary[2].banco, 171.94);
+
+  assert.equal(l4.divergences.length, 0);
+  assert.equal(l4.diferencaFinal, 0);
+  assert.equal(l4.posFora.length, 2);
+
+  assert.equal(l5.posRecebidas.length, 3);
+  assert.match(l5.summary[1].modalidade, /Loja 1: 1 · Loja 4: 2/);
+  assert.equal(l5.diferencaFinal, -12);
+  same(l5.divergences.map(d => [d.tipo, d.documento, d.valorCaixa, d.valorBanco]), [
+    ['valor_divergente', '349379', 108.97, 118.97],
+    ['ausente_banco', '349417', 5.99, null],
+    ['sobra_banco', '—', null, 7.99]
+  ]);
+
+  // Loja 2 não usa a Cielo da Loja 5: a POS de R$ 7,99 dela não leva a sobra.
+  same(r.semCielo.map(s => [s.nome, s.motivo, s.posFora.length]), [['Loja 2', 'Sem acesso à Cielo desta loja', 0]]);
+  same(r.posEntreLojas.map(p => [engine.storeName(p.caixa.loja), p.caixa.valor, p.diferencas.join(', ')]), [
+    ['Loja 1', 154.96, ''],
+    ['Loja 4', 29.96, 'Bandeira divergente'],
+    ['Loja 4', 60, 'Bandeira divergente, Débito / crédito divergente']
+  ]);
+});
+
+test('POS com outra loja: bandeira conferida, linha repetida e pagamento em dois cartões apontados', () => {
+  const { caixa, lanc } = geral();
+  const r = engine.reconcileStores(caixa, cielo(cieloLoja1, cieloLoja4, cieloLoja5), lanc);
+  const rows = r.views[1].cardAudit.rows.filter(row => row.sale && row.sale.registro === '3932');
+  assert.equal(rows.length, 2);
+  rows.forEach(row => {
+    assert.equal(row.launch.descricao, '8 - POS AMEX 1X');
+    assert.ok(row.issues.includes('Linha repetida nos Lançamentos'), JSON.stringify(row.issues));
+    assert.ok(!row.issues.includes('Registro repetido na Relação'));
+    assert.equal(row.brand, true);
+    assert.equal(row.bank.loja, '6');
+  });
+  const tef = r.views[1].cardAudit.rows.find(row => row.sale && row.sale.registro === '3888');
+  same(Array.from(tef.issues), []);
+  // POS de R$ 108,97 achada na Cielo como R$ 118,97: mesma bandeira e débito, no tempo da entrega.
+  const typo = r.views[2].cardAudit.rows.find(row => row.sale && row.sale.registro === '349379');
+  assert.equal(typo.confidence, 'entrega');
+  assert.ok(typo.issues.includes('Valor Cielo divergente'));
+});
+
+test('venda paga com dois cartões liga cada pagamento ao lançamento de mesmo valor', () => {
+  const caixa = engine.parseCaixaLines(['1-LOJA 1 JIE', '1227292 Bal 343436 29/09/2026 12:57 3/ 1 106 0,0% Cartao Mag 23,99', 'Cartao Mag 20,00']);
+  const lanc = engine.parseCardLaunchLines(['1-LOJA 1 JIE', '29/09/2026', '1 - TEF MASTER 1X 1227292 1 23,99 1,99 23,51 000500012', '7 - TEF MASTER DÉBITO 1227292 1 20,00 0,89 19,82 000500013']);
+  const banks = cielo([
+    '29/09/2026 12:57 1029024402 11.719.336/0001-25 Débito à vista Mastercard R$ 20,00 -R$ 0,18 R$ 19,82 Aprovada',
+    '29/09/2026 12:57 1029024402 11.719.336/0001-25 Crédito à vista Mastercard R$ 23,99 -R$ 0,48 R$ 23,51 Aprovada'
+  ]);
+  const view = engine.reconcileStores(caixa, banks, lanc).views[0];
+  assert.equal(caixa[1].pagamentoAdicional, true);
+  same(view.cardAudit.rows.map(row => [row.sale.valor, row.launch.descricao, row.issues.length]), [[23.99, '1 - TEF MASTER 1X', 0], [20, '7 - TEF MASTER DÉBITO', 0]]);
+});
+
+test('3 arquivos de uma loja: resultado como antes e POS indicada como Cielo da Loja 5 não enviada', () => {
+  const { caixa, lanc } = geral();
+  const r = engine.reconcileStores(caixa.filter(t => t.loja === '1'), cielo(cieloLoja1), lanc.filter(t => t.loja === '1'));
+  assert.equal(r.multi, false);
+  const view = r.views[0];
+  assert.equal(view.summary[0].modalidade, 'Caixa × Cielo');
+  same(view.divergences.map(d => [d.tipo, d.documento]), [['pos_sem_cielo', '1227327']]);
+  assert.equal(view.summary.find(s => s.nota).caixa, 154.96);
+  const row = view.cardAudit.rows.find(x => x.sale && x.sale.registro === '1227327');
+  assert.ok(row.issues.includes('Venda POS: Cielo da Loja 5 não enviada'));
+});
+
+test('Relação geral com a Cielo de uma loja: só ela é conciliada e a Loja 5 acha as POS das outras', () => {
+  const { caixa, lanc } = geral();
+  const so4 = engine.reconcileStores(caixa, cielo(cieloLoja4), lanc);
+  same(so4.views.map(v => v.nome), ['Loja 4']);
+  same(so4.views[0].divergences.map(d => d.tipo), ['pos_sem_cielo', 'pos_sem_cielo']);
+  same(so4.semCielo.map(s => s.nome), ['Loja 1', 'Loja 2', 'Loja 5']);
+
+  const so5 = engine.reconcileStores(caixa, cielo(cieloLoja5), lanc);
+  same(so5.views.map(v => v.nome), ['Loja 5']);
+  assert.equal(so5.posEntreLojas.length, 3);
+  same(so5.semCielo.map(s => [s.nome, s.posFora.length]), [['Loja 1', 1], ['Loja 2', 0], ['Loja 4', 2]]);
+});
+
+test('Cielo de uma loja com Relação de outra é recusada com explicação', () => {
+  const { caixa, lanc } = geral();
+  assert.throws(() => engine.reconcileStores(caixa.filter(t => t.loja === '1'), cielo(cieloLoja4), lanc), /A Cielo enviada é da Loja 4, mas a Relação de Vendas só tem vendas da Loja 1/);
+});
+
+test('POS só confirma pelo tempo da entrega quando a Cielo vem antes do caixa, até 3 horas', () => {
+  const pos = { valor: 50, data: '2026-09-29', hora: '17:00', registro: '1', loja: '6' };
+  const isPos = () => true;
+  const antes = engine.matchCardTransactions([pos], [{ ...bank(50, '15:30'), data: '2026-09-29' }], { isPos });
+  assert.equal(antes.matched[0].confidence, 'entrega');
+  const depois = engine.matchCardTransactions([pos], [{ ...bank(50, '17:30'), data: '2026-09-29' }], { isPos });
+  assert.equal(depois.matched[0].confidence, 'valor');
+  const longe = engine.matchCardTransactions([pos], [{ ...bank(50, '13:30'), data: '2026-09-29' }], { isPos });
+  assert.equal(longe.matched[0].confidence, 'valor');
+  const tef = engine.matchCardTransactions([pos], [{ ...bank(50, '15:30'), data: '2026-09-29' }]);
+  assert.equal(tef.matched[0].confidence, 'valor');
 });
 
 test('PIX continua conciliando recebimentos no próximo dia útil', () => {

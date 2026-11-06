@@ -14,6 +14,7 @@
     <h3>Arraste os arquivos aqui</h3>
     <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + Cielo (ou extrato PIX).</p>
     <p class="dz-extra">Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Identificamos cada relatório automaticamente.</p>
+    <p class="dz-extra">Várias lojas de uma vez: Relação e Lançamentos com todas as lojas + a Cielo de cada loja (1, 3, 4 e 5). A loja de cada Cielo é reconhecida pelo estabelecimento.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -76,6 +77,65 @@
   <!-- RESULTS -->
   <div class="results-wrap" id="resultsWrap">
 
+    <div class="store-switch" id="storeSwitch" role="group" aria-label="Escolher loja" hidden></div>
+
+    <div id="view-stores" hidden>
+      <div class="section-head">
+        <h2>2. Todas as lojas</h2>
+        <span class="sub" id="storesRunLabel"></span>
+      </div>
+      <div class="metrics metrics-4" id="storesMetrics"></div>
+      <div class="section-head">
+        <h2>3. Conciliação por loja</h2>
+        <span class="sub">Cada loja com a própria Cielo · vendas POS na Cielo da Loja 5</span>
+      </div>
+      <div class="panel">
+        <div class="table-scroll">
+          <table class="stores-table">
+            <thead>
+              <tr>
+                <th>Loja</th>
+                <th class="num">Relação</th>
+                <th class="num">Cielo da loja</th>
+                <th class="num">POS na Cielo da Loja 5</th>
+                <th class="num">POS de outras lojas</th>
+                <th class="num">Diferença final</th>
+                <th>Situação</th>
+              </tr>
+            </thead>
+            <tbody id="storesBody"></tbody>
+            <tfoot id="storesFoot"></tfoot>
+          </table>
+        </div>
+        <div class="source-note">Diferença final = Relação − (Cielo da loja + vendas POS da loja na Cielo da Loja 5 − vendas POS de outras lojas na Cielo da loja). Clique no nome da loja para ver os detalhes.</div>
+      </div>
+      <div class="section-head">
+        <h2>4. Vendas POS que caíram na Cielo da Loja 5</h2>
+        <span class="sub" id="posCount"></span>
+      </div>
+      <div class="panel">
+        <div class="table-scroll">
+          <table class="pos-table">
+            <thead>
+              <tr>
+                <th>Loja da venda</th>
+                <th>Venda no caixa</th>
+                <th>Na Cielo</th>
+                <th class="num">Valor</th>
+                <th>No sistema</th>
+                <th>Na Cielo</th>
+                <th>Conferência</th>
+              </tr>
+            </thead>
+            <tbody id="posBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="posEmpty" hidden><h4>Nenhuma venda POS de outra loja na Cielo da Loja 5</h4><p id="posEmptyNote">Todas as vendas foram encontradas na Cielo da própria loja.</p></div>
+        <div class="source-note">Na POS, o entregador passa o cartão no cliente e o caixa finaliza a venda depois. Por isso a Cielo registra antes do caixa; essa diferença de horário é o tempo da entrega (até 3 horas).</div>
+      </div>
+    </div>
+
+    <div id="storeDetail">
     <div class="result-context"><span class="badge b-blue" id="analysisMode">Conciliação de valores</span><span id="analysisScope">Valores brutos de venda</span></div>
     <div class="result-tabs" role="tablist" aria-label="Visões da conciliação">
       <button id="tab-overview" role="tab" aria-selected="true" aria-controls="view-overview" data-view="overview" class="active">Visão geral</button>
@@ -227,6 +287,7 @@
       </table></div>
     </div>
 
+    </div>
     </div>
 
   </div>
