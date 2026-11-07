@@ -12,7 +12,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf('var dropzone =')) + '\nreturn { isRelacaoPix, parseRelacaoPix, parseExtratoPix, conciliarPix, planilhasPix, PIX_STATUS, storeName }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf('var dropzone =')) + '\nreturn { isRelacaoPix, parseRelacaoPix, parseExtratoPix, conciliarPix, planilhasPix, pixLadoALado, PIX_STATUS, storeName }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 const engine = loadEngine();
@@ -133,7 +133,37 @@ test('regras: valor exato, Dom na conta da Loja 5, pagamento dividido, centavos 
   assert.deepEqual(plain(contas['83679-6'].composicao.map(x => [x.tipo, x.valor])), [['centavos', 4], ['outrasLojas', 2000], ['semVenda', 1000], ['naoEncontradas', -994]]);
   r.porConta.forEach(c => assert.equal(c.composicao.reduce((s, x) => s + x.valor, 0), c.diferenca, c.conta));
   assert.equal(r.ponte.checagem, 0);
-  assert.deepEqual(plain(r.porLoja.map(l => [l.nome, l.situacao])), [['Loja 1', 'PENDENTE'], ['Loja 2', '100% CONCILIADO'], ['Loja 3', '100% CONCILIADO'], ['Loja 4', '100% CONCILIADO'], ['Loja 5', 'PENDENTE']]);
+  // Só a venda sem Pix deixa a loja pendente: Pix a mais, centavos a mais e outra conta não.
+  assert.deepEqual(plain(r.porLoja.map(l => [l.nome, l.situacao])), [['Loja 1', 'PENDENTE'], ['Loja 2', 'CONCILIADO'], ['Loja 3', 'CONCILIADO'], ['Loja 4', 'CONCILIADO'], ['Loja 5', 'PENDENTE']]);
+});
+
+test('vendas lidas lado a lado por loja: delivery de outra loja, Pix a mais na altura do extrato e lojas da mesma conta separadas', () => {
+  const r = cenario();
+  const linhas = loja => engine.pixLadoALado(r, loja).linhas.map(l => [l.venda ? l.venda.registro : 'sem venda', l.pix.map(p => p.centavos).join('+'), l.pendente ? 'pendente' : l.atencao ? 'atenção' : l.extra ? 'a mais' : 'ok', l.outraLoja ? 'outra loja' : l.outraConta ? 'outra conta' : '']);
+  assert.deepEqual(plain(linhas('1')), [['10', '1000', 'ok', ''], ['11', '2000', 'ok', 'outra conta'], ['12', '', 'pendente', '']]);
+  assert.deepEqual(plain(linhas('6')), [
+    ['60', '3000', 'ok', ''], ['11', '2000', 'ok', 'outra loja'], ['61', '1500', 'ok', ''],
+    ['62', '500+3900', 'ok', ''], ['sem venda', '1000', 'a mais', ''], ['63', '', 'pendente', '']
+  ]);
+  assert.deepEqual(plain(linhas('2')), [['20', '800', 'ok', '']], 'a venda da Loja 4 fica só na aba da Loja 4');
+  assert.deepEqual(plain(linhas('7')), [['70', '800', 'ok', '']]);
+  assert.deepEqual(plain(linhas('3')), [['30', '1200', 'ok', ''], ['sem venda', '5000', 'a mais', '']]);
+  const l5 = engine.pixLadoALado(r, '6');
+  assert.deepEqual([l5.vendas, l5.pix, l5.pendentes, l5.atencao, l5.extras, l5.observacoes], [4, 6, 1, 0, 1, 3]);
+});
+
+test('Pix a mais não acusa pendência; recebido a menos pede conferência sem deixar a venda pendente', () => {
+  const rel = engine.parseRelacaoPix([...cabecalho, '3-LOJA 3 TESTE', venda(1, 'Bal', '10:00', '10,03'), venda(2, 'Bal', '11:00', '20,00')]);
+  const r = engine.conciliarPix(rel, [extratoLido('75079-4', [
+    ['05/11/2026', '11111111111 CLIENTE A', 10], ['05/11/2026', '22222222222 CLIENTE B', 20], ['05/11/2026', '33333333333 CLIENTE C', 99]
+  ])]);
+  assert.deepEqual(plain(r.vendas.map(v => [v.status, v.diferenca])), [[S.diferenca, -3], [S.conciliado, 0]]);
+  assert.equal(r.naoEncontradas.length, 0);
+  assert.equal(r.aMenos.length, 1);
+  const loja3 = r.porLoja.find(l => l.loja === '3');
+  assert.deepEqual(plain([loja3.situacao, loja3.qtdAMenos, loja3.valorAMenos]), ['CONCILIADO', 1, 3]);
+  const lado = engine.pixLadoALado(r, '3');
+  assert.deepEqual([lado.pendentes, lado.atencao, lado.extras], [0, 1, 1]);
 });
 
 test('centavos: 0,05 entra; 0,06 não; dois Pix de pagadores diferentes não somam', () => {
@@ -209,9 +239,10 @@ test('arquivos reais: status, casos especiais e ponte Sistema × Banco', { skip:
   assert.deepEqual(plain(r.semVenda.map(p => [p.id, p.conta, p.linha, p.centavos])), [['E092', '75079-4', 20, 10499]]);
   assert.deepEqual(plain(r.ponte), { totalSistema: 358918, centavos: 4, semVenda: 10499, naoEncontradas: 0, totalExtratos: 369421, esperado: 369421, checagem: 0 });
   assert.deepEqual(plain(r.porLoja.map(l => [l.nome, l.diferenca, l.situacao])), [
-    ['Loja 1', 0, 'CONCILIADO C/ RESSALVAS'], ['Loja 2', 0, '100% CONCILIADO'], ['Loja 3', 0, '100% CONCILIADO'],
-    ['Loja 4', 0, '100% CONCILIADO'], ['Loja 5', 4, 'CONCILIADO C/ RESSALVAS']
+    ['Loja 1', 0, 'CONCILIADO'], ['Loja 2', 0, 'CONCILIADO'], ['Loja 3', 0, 'CONCILIADO'],
+    ['Loja 4', 0, 'CONCILIADO'], ['Loja 5', 4, 'CONCILIADO']
   ]);
+  assert.deepEqual([r.naoEncontradas.length, r.aMenos.length, r.observacoes.length], [0, 0, 3]);
   assert.deepEqual(plain(r.avisos), []);
   const abas = engine.planilhasPix(r);
   assert.deepEqual(plain(abas.map(a => [a.nome, a.linhas.length])), [['Conciliação PIX', 28], ['Venda a venda', 123], ['Pix sem venda', 2], ['Extratos PIX', 159], ['Vendas Sistema PIX', 123]]);
@@ -244,4 +275,16 @@ test('arquivos reais: venda a venda igual ao gabarito da conferência manual', {
     if(JSON.stringify(esperado) !== JSON.stringify(obtido)) divergencias.push(l[0] + ' gabarito ' + JSON.stringify(esperado) + ' × ferramenta ' + JSON.stringify(obtido));
   });
   assert.deepEqual(divergencias, [], 'Linhas diferentes do gabarito:\n' + divergencias.join('\n'));
+});
+
+test('arquivos reais: vendas lidas lado a lado de cada loja', { skip: semExemplos }, () => {
+  const r = exemplo().resultado;
+  const resumo = loja => { const l = engine.pixLadoALado(r, loja); return [l.linhas.length, l.vendas, l.pix, l.pendentes, l.atencao, l.extras, l.observacoes]; };
+  assert.deepEqual(plain(['1', '2', '3', '7', '6'].map(resumo)), [[20, 20, 20, 0, 0, 0, 1], [20, 20, 20, 0, 0, 0, 0], [19, 18, 19, 0, 0, 1, 0], [30, 30, 30, 0, 0, 0, 0], [34, 33, 35, 0, 0, 0, 3]]);
+  const loja3 = engine.pixLadoALado(r, '3').linhas;
+  const i = loja3.findIndex(l => !l.venda);
+  assert.deepEqual(plain([loja3[i].pix[0].id, loja3[i - 1].venda.id, loja3[i + 1].venda.id]), ['E092', 'S046', 'S047'], 'o Pix sem venda fica entre as vendas das linhas 19 e 22 do extrato');
+  const delivery = engine.pixLadoALado(r, '6').linhas.find(l => l.outraLoja);
+  assert.deepEqual(plain([delivery.venda.id, delivery.pix[0].linha]), ['S018', 41]);
+  assert.equal(engine.pixLadoALado(r, '1').linhas.find(l => l.outraConta).venda.id, 'S018');
 });

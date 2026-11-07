@@ -24,7 +24,9 @@ var state = {
   multi: null,      // resultado por loja (Cielo); null no extrato PIX
   storeKey: null,   // 'todas' ou o código da loja exibida
   pix: null,        // resultado da conciliação PIX (Relação CARTEIRA DIGITAL × extratos Sicredi)
-  pixFiltro: 'pending'
+  pixFiltro: 'pending',
+  pixLoja: 'todas', // 'todas' ou o código da loja exibida no PIX
+  pixAba: 'overview'
 };
 
 // Cadastro de Cartões Magnéticos fornecido pelo sistema (código -> descrição).
@@ -1302,8 +1304,10 @@ function conciliarPix(relacao, extratos){
     return {
       loja: loja, nome: storeName(loja), nomePdf: info ? info.nomePdf : '', conta: conta, arquivo: porConta.has(conta) ? porConta.get(conta).arquivo : '',
       qtdVendas: vs.length, totalSistema: totalSistema, qtdConciliadas: conc.length, totalBanco: totalBanco, diferenca: totalBanco - totalSistema,
-      qtdNaoEncontradas: nao.length, valorNaoEncontrado: pixSoma(nao), qtdRessalvas: conc.filter(function(v){ return v.status !== PIX_STATUS.conciliado; }).length,
-      situacao: !vs.length ? 'SEM VENDAS PIX' : nao.length ? 'PENDENTE' : conc.every(function(v){ return v.status === PIX_STATUS.conciliado; }) ? '100% CONCILIADO' : 'CONCILIADO C/ RESSALVAS'
+      qtdNaoEncontradas: nao.length, valorNaoEncontrado: pixSoma(nao),
+      qtdAMenos: conc.filter(function(v){ return v.diferenca < 0; }).length, valorAMenos: -pixSoma(conc.filter(function(v){ return v.diferenca < 0; }), 'diferenca'),
+      // Só a venda sem Pix deixa a loja pendente; Pix a mais, centavos e outra conta não.
+      situacao: !vs.length ? 'SEM VENDAS PIX' : nao.length ? 'PENDENTE' : 'CONCILIADO'
     };
   });
 
@@ -1322,7 +1326,7 @@ function conciliarPix(relacao, extratos){
     var composicao = [
       { tipo: 'centavos', texto: 'Diferenças de centavos nas vendas conciliadas', valor: pixSoma(aqui, 'diferenca'), qtd: aqui.filter(function(v){ return v.diferenca; }).length },
       { tipo: 'outrasLojas', texto: 'Pix de vendas de outras lojas que caíram nesta conta' + (origem ? ' (' + origem + ')' : ''), valor: pixSoma(deOutras, 'banco'), qtd: deOutras.length },
-      { tipo: 'semVenda', texto: 'Pix sem venda no sistema', valor: pixSoma(sem), qtd: sem.length },
+      { tipo: 'semVenda', texto: 'Pix a mais no extrato (sem venda no sistema)', valor: pixSoma(sem), qtd: sem.length },
       { tipo: 'outraConta', texto: 'Vendas destas lojas que caíram em outra conta' + (destino ? ' (' + destino + ')' : ''), valor: -pixSoma(emOutra), qtd: emOutra.length },
       { tipo: 'naoEncontradas', texto: 'Vendas não encontradas no extrato', valor: -pixSoma(nao), qtd: nao.length }
     ].filter(function(x){ return x.qtd > 0; });
@@ -1349,9 +1353,48 @@ function conciliarPix(relacao, extratos){
   return {
     periodo: periodo, vendas: vendas, pix: pix, porLoja: porLoja, porConta: contas, ponte: ponte,
     naoEncontradas: naoEncontradas, semVenda: semVenda, foraDoPeriodo: pix.filter(function(p){ return !p.noPeriodo; }),
-    ressalvas: conciliadas.filter(function(v){ return v.status !== PIX_STATUS.conciliado; }),
+    aMenos: conciliadas.filter(function(v){ return v.diferenca < 0; }),
+    observacoes: conciliadas.filter(function(v){ return v.status !== PIX_STATUS.conciliado && v.diferenca >= 0; }),
     contagem: { vendas: contar(vendas, 'status'), pix: contar(pix, 'situacao') },
     avisos: avisos
+  };
+}
+
+// "Vendas lidas" de uma loja, lado a lado: cada venda da loja com o(s) Pix que a pagaram
+// e os Pix sem venda da conta onde a loja recebe. Pix desta conta que pagaram vendas de
+// outra loja (delivery na conta da Loja 5) também entram, com a loja da venda, como as
+// vendas POS na conciliação de cartão. Lojas que dividem a conta (2 e 4) não se misturam.
+// Pix sem venda ficam na altura do extrato: logo depois do Pix da linha anterior.
+function pixLadoALado(r, loja){
+  var conta = pixContaDaLoja(loja), compartilhada = (pixContaCadastrada(conta) || { lojas: [] }).lojas.length > 1;
+  var linhas = [];
+  r.vendas.forEach(function(v){
+    var daLoja = v.loja === loja;
+    var deFora = !daLoja && v.pix.length && v.contaRecebida === conta && pixContaDaLoja(v.loja) !== conta;
+    if(!daLoja && !deFora) return;
+    linhas.push({ venda: v, pix: v.pix, situacao: v.status, outraLoja: !daLoja, outraConta: daLoja && !!v.pix.length && v.contaRecebida !== conta, chave: v.data + ' ' + (v.hora || '') });
+  });
+  r.semVenda.filter(function(p){ return p.conta === conta; }).forEach(function(p){
+    var antes = r.pix.filter(function(x){ return x.conta === conta && x.noPeriodo && x.venda && x.linha < p.linha; }).sort(function(a, b){ return b.linha - a.linha; })[0];
+    var chave = antes ? antes.venda.data + ' ' + (antes.venda.hora || '') + '~' : p.data + ' ';
+    linhas.push({ venda: null, pix: [p], situacao: p.situacao, compartilhada: compartilhada, chave: chave });
+  });
+  linhas.sort(function(a, b){ return a.chave.localeCompare(b.chave) || (a.venda ? a.venda.id : a.pix[0].id).localeCompare(b.venda ? b.venda.id : b.pix[0].id); });
+  linhas.forEach(function(l){
+    // Pendência é só venda sem Pix; recebido a menos pede atenção; Pix a mais é informação.
+    l.pendente = l.situacao === PIX_STATUS.naoEncontrado;
+    l.atencao = !!l.venda && !!l.pix.length && l.venda.diferenca < 0;
+    l.extra = l.situacao === PIX_STATUS.semVenda;
+    l.observacao = !l.pendente && !l.atencao && !l.extra && l.situacao !== PIX_STATUS.conciliado;
+  });
+  return {
+    loja: loja, conta: conta, compartilhada: compartilhada, linhas: linhas,
+    vendas: linhas.filter(function(l){ return l.venda && !l.outraLoja; }).length,
+    pix: linhas.reduce(function(n, l){ return n + l.pix.length; }, 0),
+    pendentes: linhas.filter(function(l){ return l.pendente; }).length,
+    atencao: linhas.filter(function(l){ return l.atencao; }).length,
+    extras: linhas.filter(function(l){ return l.extra; }).length,
+    observacoes: linhas.filter(function(l){ return l.observacao; }).length
   };
 }
 
@@ -1669,21 +1712,30 @@ async function processarPix(){
   showOverlay('Conciliando os Pix…');
   state.pix = conciliarPix(relacao, extratos);
   state.pixFiltro = 'pending';
+  state.pixLoja = 'todas';
+  state.pixAba = 'overview';
   document.getElementById('pixSearch').value = '';
   state.processedOnce = true;
   renderPix();
-  var r = state.pix, pendencias = r.naoEncontradas.length + r.semVenda.length;
+  var r = state.pix, nao = r.naoEncontradas.length;
   if(r.avisos.length) showToast('Conciliação PIX processada com avisos. Confira o quadro vermelho antes de usar o resultado.', true);
-  else showToast(pendencias ? 'Conciliação PIX processada: ' + pendencias + ' pendência(s).' : 'Conciliação PIX processada sem pendências.');
+  else showToast(nao ? 'Conciliação PIX: ' + pixQtd(nao, 'venda do sistema não foi encontrada', 'vendas do sistema não foram encontradas') + ' no extrato.' : 'Conciliação PIX: todas as vendas do sistema foram encontradas nos extratos.', nao > 0);
 }
 
+// Só a venda do sistema sem Pix é pendência (vermelho). Recebido a menos pede conferência
+// (âmbar). Pix a mais no extrato, centavos a mais e outra conta são apenas informação.
 function pixDiferencaTexto(c){ return c === 0 ? fmtBRL(0) : (c > 0 ? '+ ' : '− ') + fmtBRL(Math.abs(c) / 100); }
-function pixStatusHtml(status){
-  var bad = [PIX_STATUS.naoEncontrado, PIX_STATUS.semVenda, 'PENDENTE'], ok = [PIX_STATUS.conciliado, '100% CONCILIADO'], off = [PIX_STATUS.foraDoPeriodo, 'SEM VENDAS PIX'];
-  var classe = bad.includes(status) ? 'bad' : ok.includes(status) ? 'ok' : off.includes(status) ? 'off' : 'warn';
+function pixStatusHtml(status, aMenos){
+  var classe = status === PIX_STATUS.naoEncontrado || status === 'PENDENTE' ? 'bad'
+    : aMenos ? 'warn'
+    : status === PIX_STATUS.semVenda ? 'info'
+    : status === PIX_STATUS.foraDoPeriodo || status === 'SEM VENDAS PIX' ? 'off' : 'ok';
   return '<span class="pix-status ' + classe + '">' + escapeHtml(status) + '</span>';
 }
-function pixContaPendente(c){ return c.composicao.some(function(x){ return x.tipo === 'semVenda' || x.tipo === 'naoEncontradas'; }); }
+function pixVendaAMenos(v){ return !!v && v.pix.length > 0 && v.diferenca < 0; }
+function pixClasseDiferenca(c, pendente){ return c === 0 ? 'diff-zero' : pendente ? 'diff-neg' : c < 0 ? 'pix-diff-warn' : 'pix-diff-info'; }
+function pixContaPendente(c){ return c.composicao.some(function(x){ return x.tipo === 'naoEncontradas'; }); }
+function pixComposicaoClasse(x){ return x.tipo === 'naoEncontradas' ? 'bad' : x.tipo === 'centavos' && x.valor < 0 ? 'warn' : 'info'; }
 function pixQtd(n, singular, plural){ return n + ' ' + (n === 1 ? singular : plural); }
 
 function renderPix(){
@@ -1697,14 +1749,16 @@ function renderPix(){
   document.getElementById('btnExportLabel').textContent = 'Exportar conciliação PIX (.xlsx)';
   document.getElementById('pixRunLabel').textContent = 'Data conciliada ' + pixPeriodoTexto(r.periodo) + ' · processado em ' + new Date().toLocaleString('pt-BR');
 
-  var nao = r.naoEncontradas.length, sem = r.semVenda.length, ressalvas = r.ressalvas.length;
-  var status = nao || sem
-    ? ['bad', 'Pendente', [nao ? pixQtd(nao, 'venda não encontrada', 'vendas não encontradas') : '', sem ? pixQtd(sem, 'Pix sem venda', 'Pix sem venda') : '', ressalvas ? pixQtd(ressalvas, 'ressalva', 'ressalvas') : ''].filter(Boolean).join(' · ')]
-    : ressalvas ? ['review', 'Conciliado c/ ressalvas', pixQtd(ressalvas, 'venda com ressalva', 'vendas com ressalva') + ': centavos ou outra conta'] : ['ok', 'Tudo conciliado', 'Todas as vendas PIX foram encontradas nos extratos'];
+  var nao = r.naoEncontradas.length, sem = r.semVenda.length, aMenos = r.aMenos.length;
+  var encontradas = r.vendas.length - nao;
+  var status = nao
+    ? ['bad', 'Pendente', pixQtd(nao, 'venda do sistema sem Pix no extrato', 'vendas do sistema sem Pix no extrato') + ' (' + fmtBRL(p.naoEncontradas / 100) + ')']
+    : aMenos ? ['review', 'Conferir centavos', pixQtd(aMenos, 'venda recebida', 'vendas recebidas') + ' com até R$ 0,05 a menos']
+    : ['ok', 'Conciliado', 'Todas as vendas PIX do sistema foram encontradas nos extratos'];
   var metrics = [
     ['Vendas PIX · sistema', fmtBRL(p.totalSistema / 100), pixQtd(r.vendas.length, 'venda', 'vendas') + ' em ' + r.porLoja.filter(function(l){ return l.qtdVendas; }).length + ' loja(s)'],
-    ['Pix nos extratos · ' + pixPeriodoTexto(r.periodo), fmtBRL(p.totalExtratos / 100), pixQtd(r.pix.length - r.foraDoPeriodo.length, 'Pix', 'Pix') + ' em ' + r.porConta.filter(function(c){ return c.enviado; }).length + ' contas · ' + r.foraDoPeriodo.length + ' de outro dia'],
-    ['Diferença Banco − Sistema', pixDiferencaTexto(p.totalExtratos - p.totalSistema), 'Explicada na ponte abaixo']
+    ['Vendas encontradas nos extratos', encontradas + ' de ' + r.vendas.length, nao ? pixQtd(nao, 'venda sem Pix', 'vendas sem Pix') : 'Nenhuma venda faltando'],
+    ['Pix nos extratos · ' + pixPeriodoTexto(r.periodo), fmtBRL(p.totalExtratos / 100), pixQtd(r.pix.length - r.foraDoPeriodo.length, 'Pix', 'Pix') + ' em ' + r.porConta.filter(function(c){ return c.enviado; }).length + ' contas' + (sem ? ' · ' + sem + ' a mais, sem venda' : '') + ' · ' + r.foraDoPeriodo.length + ' de outro dia']
   ];
   document.getElementById('pixMetrics').innerHTML = metrics.map(function(x){ return '<div class="metric-card"><div class="m-label">' + escapeHtml(x[0]) + '</div><div class="m-value">' + x[1] + '</div><div class="m-sub">' + escapeHtml(x[2]) + '</div></div>'; }).join('')
     + '<div class="metric-card status"><div class="m-label">Status geral</div><div class="m-value"><span class="status-badge ' + status[0] + '">' + status[1] + '</span></div><div class="m-sub">' + escapeHtml(status[2]) + '</div></div>';
@@ -1714,9 +1768,9 @@ function renderPix(){
   alertEl.innerHTML = r.avisos.length ? '<span class="integrity-symbol" aria-hidden="true">!</span><div><strong>Confira antes de usar o resultado</strong><ul>' + r.avisos.map(function(a){ return '<li>' + escapeHtml(a) + '</li>'; }).join('') + '</ul></div>' : '';
 
   document.getElementById('pixLojasBody').innerHTML = r.porLoja.map(function(l){
-    var diffClass = l.diferenca === 0 ? 'diff-zero' : l.qtdNaoEncontradas ? 'diff-neg' : 'pix-diff-warn';
-    var nota = l.qtdRessalvas ? '<small>' + pixQtd(l.qtdRessalvas, 'venda com ressalva', 'vendas com ressalva') + '</small>' : '';
-    return '<tr class="' + (l.qtdNaoEncontradas ? 'pix-row-bad' : '') + '"><td><strong>' + escapeHtml(l.nome) + '</strong><small>' + escapeHtml(l.nomePdf || storeCodeNote(l.loja) || '') + '</small></td>'
+    var diffClass = pixClasseDiferenca(l.diferenca, l.qtdNaoEncontradas > 0);
+    var nota = l.qtdAMenos ? '<small class="pix-diff-warn">' + pixQtd(l.qtdAMenos, 'venda recebida', 'vendas recebidas') + ' ' + fmtBRL(l.valorAMenos / 100) + ' a menos</small>' : '';
+    return '<tr class="' + (l.qtdNaoEncontradas ? 'pix-row-bad' : '') + '"><td><button type="button" class="store-link" data-pix-loja="' + escapeHtml(l.loja) + '">' + escapeHtml(l.nome) + '</button><small>' + escapeHtml(l.nomePdf || storeCodeNote(l.loja) || '') + '</small></td>'
       + '<td class="mono">' + escapeHtml(l.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(l.conta)) + (l.arquivo ? ' · ' + escapeHtml(l.arquivo) : '') + '</small></td>'
       + '<td class="num">' + fmtBRL(l.totalSistema / 100) + '<small>' + pixQtd(l.qtdVendas, 'venda', 'vendas') + '</small></td>'
       + '<td class="num">' + fmtBRL(l.totalBanco / 100) + '<small>' + pixQtd(l.qtdConciliadas, 'conciliada', 'conciliadas') + '</small></td>'
@@ -1728,9 +1782,9 @@ function renderPix(){
 
   document.getElementById('pixContasBody').innerHTML = r.porConta.map(function(c){
     var pendente = pixContaPendente(c);
-    var diffClass = c.diferenca === 0 ? 'diff-zero' : pendente ? 'diff-neg' : 'pix-diff-warn';
+    var diffClass = pixClasseDiferenca(c.diferenca, pendente);
     var composicao = c.composicao.length
-      ? '<ul class="pix-composicao">' + c.composicao.map(function(x){ var ruim = x.tipo === 'semVenda' || x.tipo === 'naoEncontradas'; return '<li class="' + (ruim ? 'bad' : 'warn') + '"><b>' + pixDiferencaTexto(x.valor) + '</b> ' + escapeHtml(x.texto) + '</li>'; }).join('') + '</ul>'
+      ? '<ul class="pix-composicao">' + c.composicao.map(function(x){ return '<li class="' + pixComposicaoClasse(x) + '"><b>' + pixDiferencaTexto(x.valor) + '</b> ' + escapeHtml(x.texto) + '</li>'; }).join('') + '</ul>'
       : '<span class="muted">Sem diferença</span>';
     return '<tr class="' + (pendente ? 'pix-row-bad' : '') + '"><td class="mono"><strong>' + escapeHtml(c.conta) + '</strong><small>' + escapeHtml(c.arquivo || 'extrato não enviado') + '</small></td>'
       + '<td>' + escapeHtml(c.nome) + '</td>'
@@ -1744,8 +1798,8 @@ function renderPix(){
 
   var ponte = [
     ['Total vendas PIX no sistema', fmtBRL(p.totalSistema / 100), ''],
-    ['(+) Diferenças de centavos nas vendas conciliadas', pixDiferencaTexto(p.centavos), p.centavos ? 'pix-diff-warn' : ''],
-    ['(+) Pix no banco sem venda no sistema', pixDiferencaTexto(p.semVenda), p.semVenda ? 'diff-neg' : ''],
+    ['(+) Diferenças de centavos nas vendas conciliadas', pixDiferencaTexto(p.centavos), p.centavos < 0 ? 'pix-diff-warn' : ''],
+    ['(+) Pix a mais no extrato (sem venda no sistema)', pixDiferencaTexto(p.semVenda), ''],
     ['(−) Vendas não encontradas no extrato', pixDiferencaTexto(-p.naoEncontradas), p.naoEncontradas ? 'diff-neg' : ''],
     ['(=) Total Pix esperado nos extratos', fmtBRL(p.esperado / 100), 'pix-strong'],
     ['Total Pix nos extratos (período)', fmtBRL(p.totalExtratos / 100), 'pix-strong'],
@@ -1755,24 +1809,199 @@ function renderPix(){
 
   renderPixVendas();
 
-  document.getElementById('pixSemVendaCount').textContent = sem ? pixQtd(sem, 'Pix', 'Pix') + ' · ' + fmtBRL(p.semVenda / 100) : '';
+  document.getElementById('pixSemVendaCount').textContent = sem ? pixQtd(sem, 'Pix', 'Pix') + ' · ' + fmtBRL(p.semVenda / 100) : 'nenhum';
   document.getElementById('pixSemVendaEmpty').hidden = sem > 0;
   document.getElementById('pixSemVendaWrap').hidden = !sem;
   document.getElementById('pixSemVendaBody').innerHTML = r.semVenda.map(function(x){
-    return '<tr class="pix-row-bad"><td class="mono">' + escapeHtml(x.id) + '</td><td class="mono">' + escapeHtml(x.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(x.conta)) + '</small></td><td>' + escapeHtml(x.arquivo) + '<small>linha ' + x.linha + '</small></td><td class="mono">' + formatDateBR(x.data) + '</td><td>' + escapeHtml(x.pagador) + '</td><td class="num diff-neg">' + fmtBRL(x.centavos / 100) + '</td><td>' + pixStatusHtml(x.situacao) + '</td></tr>';
+    return '<tr><td class="mono">' + escapeHtml(x.id) + '</td><td class="mono">' + escapeHtml(x.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(x.conta)) + '</small></td><td>' + escapeHtml(x.arquivo) + '<small>linha ' + x.linha + '</small></td><td class="mono">' + formatDateBR(x.data) + '</td><td>' + escapeHtml(x.pagador) + '</td><td class="num">' + fmtBRL(x.centavos / 100) + '</td><td>' + pixStatusHtml(x.situacao) + '</td></tr>';
   }).join('');
 
   document.getElementById('pixForaCount').textContent = r.foraDoPeriodo.length ? pixQtd(r.foraDoPeriodo.length, 'Pix', 'Pix') + ' · ' + fmtBRL(pixSoma(r.foraDoPeriodo) / 100) : 'nenhum';
   document.getElementById('pixForaBody').innerHTML = r.foraDoPeriodo.map(function(x){
     return '<tr><td class="mono">' + escapeHtml(x.id) + '</td><td class="mono">' + escapeHtml(x.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(x.conta)) + '</small></td><td>' + escapeHtml(x.arquivo) + '<small>linha ' + x.linha + '</small></td><td class="mono">' + (x.data ? formatDateBR(x.data) : '—') + '</td><td>' + escapeHtml(x.pagador) + '</td><td class="num">' + fmtBRL(x.centavos / 100) + '</td></tr>';
   }).join('');
+
+  mostrarPixLoja(state.pixLoja, true);
 }
+
+/* ---------- PIX por loja: botões das lojas, visão geral e vendas lidas lado a lado ---------- */
+function renderPixStoreSwitch(){
+  var r = state.pix;
+  var botoes = [{ key: 'todas', label: 'Todas as lojas', lado: null }].concat(r.porLoja.map(function(l){ return { key: l.loja, label: l.nome, lado: pixLadoALado(r, l.loja) }; }));
+  document.getElementById('pixStoreSwitch').innerHTML = botoes.map(function(b){
+    var active = state.pixLoja === b.key, contador = '';
+    if(b.lado){
+      if(b.lado.pendentes) contador = '<span class="bad" title="' + pixQtd(b.lado.pendentes, 'venda sem Pix no extrato', 'vendas sem Pix no extrato') + '">' + b.lado.pendentes + '</span>';
+      else if(b.lado.atencao) contador = '<span title="' + pixQtd(b.lado.atencao, 'venda recebida', 'vendas recebidas') + ' com centavos a menos">' + b.lado.atencao + '</span>';
+      else contador = '<span class="ok" title="Todas as vendas conciliadas">✓</span>';
+    }
+    return '<button type="button" data-pix-loja="' + escapeHtml(b.key) + '" class="' + (active ? 'active' : '') + '" aria-pressed="' + active + '">' + escapeHtml(b.label) + contador + '</button>';
+  }).join('');
+}
+
+function mostrarPixLoja(key, manterAba){
+  if(!state.pix) return;
+  if(key !== 'todas' && !state.pix.porLoja.some(function(l){ return l.loja === key; })) key = 'todas';
+  state.pixLoja = key;
+  renderPixStoreSwitch();
+  var todas = key === 'todas';
+  document.getElementById('pixTodas').hidden = !todas;
+  document.getElementById('pixLoja').hidden = todas;
+  if(todas) return;
+  renderPixLoja(key);
+  selecionarPixAba(manterAba ? state.pixAba : 'overview');
+}
+
+function selecionarPixAba(aba){
+  state.pixAba = aba;
+  document.querySelectorAll('[data-pix-tab]').forEach(function(button){
+    var active = button.dataset.pixTab === aba;
+    button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+    document.getElementById('pixLoja-' + button.dataset.pixTab).hidden = !active;
+  });
+}
+
+function renderPixLoja(loja){
+  var r = state.pix, l = r.porLoja.find(function(x){ return x.loja === loja; }), lado = pixLadoALado(r, loja);
+  var conta = r.porConta.find(function(c){ return c.conta === lado.conta; });
+  document.getElementById('pixLojaTitulo').textContent = l.nome + ' · PIX';
+  document.getElementById('pixLojaSub').textContent = (l.nomePdf ? l.nomePdf + ' no PDF · ' : '') + 'recebe na conta ' + lado.conta + (lado.compartilhada ? ' (' + pixNomeConta(lado.conta) + ')' : '');
+  document.getElementById('pixLojaH2').textContent = '2. Visão geral · ' + l.nome;
+  document.getElementById('pixLojaRunLabel').textContent = 'Data conciliada ' + pixPeriodoTexto(r.periodo);
+
+  var status = !l.qtdVendas ? ['idle', 'Sem vendas PIX', 'A Relação não tem vendas PIX desta loja']
+    : l.qtdNaoEncontradas ? ['bad', 'Pendente', pixQtd(l.qtdNaoEncontradas, 'venda sem Pix no extrato', 'vendas sem Pix no extrato')]
+    : l.qtdAMenos ? ['review', 'Conferir centavos', pixQtd(l.qtdAMenos, 'venda recebida', 'vendas recebidas') + ' ' + fmtBRL(l.valorAMenos / 100) + ' a menos']
+    : ['ok', 'Conciliado', 'Todas as vendas desta loja têm o seu Pix'];
+  var metrics = [
+    ['Vendas PIX · sistema', fmtBRL(l.totalSistema / 100), pixQtd(l.qtdVendas, 'venda', 'vendas') + ' no PDF'],
+    ['Vendas encontradas', l.qtdConciliadas + ' de ' + l.qtdVendas, fmtBRL(l.totalBanco / 100) + ' recebidos em Pix'],
+    ['Vendas sem Pix', l.qtdNaoEncontradas ? fmtBRL(l.valorNaoEncontrado / 100) : 'Nenhuma', l.qtdNaoEncontradas ? pixQtd(l.qtdNaoEncontradas, 'venda não encontrada', 'vendas não encontradas') + ' no extrato' : 'Nada faltando no extrato']
+  ];
+  document.getElementById('pixLojaMetrics').innerHTML = metrics.map(function(x){ return '<div class="metric-card"><div class="m-label">' + escapeHtml(x[0]) + '</div><div class="m-value">' + x[1] + '</div><div class="m-sub">' + escapeHtml(x[2]) + '</div></div>'; }).join('')
+    + '<div class="metric-card status"><div class="m-label">Status da loja</div><div class="m-value"><span class="status-badge ' + status[0] + '">' + status[1] + '</span></div><div class="m-sub">' + escapeHtml(status[2]) + '</div></div>';
+
+  document.getElementById('pixLojaContaSub').textContent = lado.compartilhada ? 'Conta dividida: ' + pixNomeConta(lado.conta) : '';
+  var diffClass = pixClasseDiferenca(conta.diferenca, pixContaPendente(conta));
+  var nota = loja === '7' ? '<p class="pix-conta-nota">A ' + escapeHtml(l.nome) + ' não tem conta própria: recebe na conta da Loja 2. Os números abaixo são da conta inteira (' + escapeHtml(conta.nome) + ').</p>'
+    : lado.compartilhada ? '<p class="pix-conta-nota">Esta conta também recebe os Pix da ' + escapeHtml(conta.nome.split(' + ').filter(function(n){ return n !== l.nome; }).join(' + ')) + '. Os números abaixo são da conta inteira.</p>' : '';
+  document.getElementById('pixLojaConta').innerHTML = nota
+    + '<div class="pix-conta-grid">'
+    + '<div><span>Conta</span><strong class="mono">' + escapeHtml(conta.conta) + '</strong><small>' + escapeHtml(conta.arquivo || 'extrato não enviado') + '</small></div>'
+    + '<div><span>Pix no extrato (dia)</span><strong>' + fmtBRL(conta.totalPeriodo / 100) + '</strong><small>' + pixQtd(conta.qtdPeriodo, 'Pix', 'Pix') + '</small></div>'
+    + '<div><span>Vendas de ' + escapeHtml(conta.nome) + '</span><strong>' + fmtBRL(conta.totalSistema / 100) + '</strong><small>' + pixQtd(conta.qtdVendasSistema, 'venda', 'vendas') + '</small></div>'
+    + '<div><span>Diferença Banco − Sistema</span><strong class="' + diffClass + '">' + pixDiferencaTexto(conta.diferenca) + '</strong><small>' + (conta.qtdFora ? pixQtd(conta.qtdFora, 'Pix', 'Pix') + ' de outro dia fora da conta' : 'nenhum Pix de outro dia') + '</small></div>'
+    + '</div>'
+    + (conta.composicao.length ? '<ul class="pix-composicao pix-conta-composicao">' + conta.composicao.map(function(x){ return '<li class="' + pixComposicaoClasse(x) + '"><b>' + pixDiferencaTexto(x.valor) + '</b> ' + escapeHtml(x.texto) + '</li>'; }).join('') + '</ul>' : '<p class="pix-conta-nota">Sem diferença nesta conta.</p>');
+
+  var conferir = lado.linhas.map(function(linha, i){ return { linha: linha, i: i }; }).filter(function(x){ return x.linha.pendente || x.linha.atencao; });
+  var obs = [];
+  var outraConta = lado.linhas.filter(function(x){ return x.outraConta; }).length, outraLoja = lado.linhas.filter(function(x){ return x.outraLoja; }).length;
+  var centavos = lado.linhas.filter(function(x){ return x.venda && !x.outraLoja && x.pix.length && x.venda.diferenca > 0; }).length;
+  if(outraConta) obs.push(pixQtd(outraConta, 'venda desta loja caiu', 'vendas desta loja caíram') + ' na conta de outra loja');
+  if(outraLoja) obs.push(pixQtd(outraLoja, 'venda de outra loja caiu', 'vendas de outras lojas caíram') + ' nesta conta');
+  if(centavos) obs.push(pixQtd(centavos, 'venda recebida', 'vendas recebidas') + ' com centavos a mais');
+  if(lado.extras) obs.push(pixQtd(lado.extras, 'Pix a mais', 'Pix a mais') + ' no extrato, sem venda no sistema (' + fmtBRL(pixSoma(lado.linhas.filter(function(x){ return x.extra; }).map(function(x){ return x.pix[0]; })) / 100) + ')');
+  document.getElementById('pixLojaObs').hidden = !obs.length;
+  document.getElementById('pixLojaObs').textContent = obs.length ? 'Não precisa de ação: ' + obs.join(' · ') + '. Detalhes em "Vendas lidas".' : '';
+  document.getElementById('pixLojaConferirCount').textContent = conferir.length ? pixQtd(conferir.length, 'item', 'itens') : '';
+  document.getElementById('pixLojaConferirEmpty').hidden = conferir.length > 0;
+  document.getElementById('pixLojaConferir').hidden = !conferir.length;
+  document.getElementById('pixLojaConferir').innerHTML = conferir.map(function(x){
+    var linha = x.linha, v = linha.venda;
+    var titulo = v.id + ' · ' + (linha.outraLoja ? 'venda da ' + storeName(v.loja) + ' · ' : '') + 'Reg. ' + v.registro + ' · ' + (v.hora || '') + ' · ' + fmtBRL(v.centavos / 100);
+    return '<li class="' + (linha.pendente ? 'bad' : 'warn') + '"><div><strong>' + escapeHtml(titulo) + '</strong>' + pixStatusHtml(linha.situacao, linha.atencao) + '<p>' + escapeHtml(v.observacao) + '</p></div><button type="button" class="store-link" data-pix-ver="' + x.i + '">Ver nas vendas lidas</button></li>';
+  }).join('');
+
+  var problemas = lado.pendentes + lado.atencao, tabCount = document.getElementById('pixSourceTabCount');
+  tabCount.hidden = !problemas; tabCount.textContent = problemas;
+  renderPixLadoALado(lado, l);
+}
+
+function renderPixLadoALado(lado, l){
+  var countA = 0, countB = 0, temProblema = false;
+  document.getElementById('pixSourceNote').textContent = 'Vendas da ' + l.nome + ' no PDF (lado A) e os Pix do extrato que pagaram cada uma (lado B). '
+    + 'Entram também os Pix sem venda da conta ' + lado.conta + ' e os Pix desta conta que pagaram vendas de outras lojas (delivery), na altura em que aparecem no extrato. '
+    + (lado.compartilhada ? 'A conta é dividida (' + pixNomeConta(lado.conta) + '): os Pix sem venda dela aparecem nas abas das duas lojas. ' : '')
+    + 'Pix de outro dia ficam em "Todas as lojas".';
+  document.getElementById('pixSourceCount').textContent = pixQtd(lado.vendas, 'venda', 'vendas') + ' · ' + pixQtd(lado.pix, 'Pix', 'Pix');
+  document.getElementById('pixSourceBody').innerHTML = lado.linhas.map(function(linha, i){
+    var v = linha.venda, pix = linha.pix, a, b;
+    if(linha.pendente || linha.atencao) temProblema = true;
+    if(!v) a = '<td colspan="6" class="missing-side">— sem venda no sistema (Pix a mais no extrato) —</td>';
+    else {
+      var tagA = linha.outraLoja ? '<span class="store-tag">Venda da ' + escapeHtml(storeName(v.loja)) + '</span>' : '';
+      a = '<td class="num pix-idx">' + (++countA) + '</td><td><strong>' + escapeHtml(v.id) + '</strong>' + tagA + '<small>Reg. ' + escapeHtml(v.registro) + ' · Doc. ' + escapeHtml(v.documento) + '</small></td>'
+        + '<td class="mono">' + escapeHtml(v.hora || '—') + '</td><td>' + escapeHtml(v.sit) + (v.delivery ? '<small>delivery</small>' : '') + '</td>'
+        + '<td class="num">' + fmtBRL(v.centavos / 100) + '</td><td class="raw" title="' + escapeHtml(v.raw) + '">' + escapeHtml(v.raw) + '</td>';
+    }
+    if(!pix.length) b = '<td colspan="6" class="missing-side side-divider">— nenhum Pix encontrado no extrato —</td>';
+    else {
+      var inicio = countB + 1; countB += pix.length;
+      var tagB = linha.outraConta ? '<span class="store-tag">conta da ' + escapeHtml(pixNomeConta(pix[0].conta)) + '</span>' : linha.compartilhada ? '<span class="store-tag">conta da ' + escapeHtml(pixNomeConta(pix[0].conta)) + '</span>' : '';
+      var valorB = pix.length > 1 ? pix.map(function(p){ return pixReais(p.centavos); }).join(' + ') + '<small>= ' + fmtBRL(pixSoma(pix) / 100) + '</small>' : fmtBRL(pix[0].centavos / 100);
+      var diff = v && v.diferenca ? '<small>diferença ' + pixDiferencaTexto(v.diferenca) + '</small>' : '';
+      b = '<td class="num side-divider pix-idx">' + (pix.length > 1 ? inicio + '–' + countB : inicio) + '</td><td><strong>' + escapeHtml(pix.map(function(p){ return p.id; }).join(' + ')) + '</strong></td>'
+        + '<td class="mono">' + escapeHtml(pix[0].conta) + tagB + '<small>linha ' + pix.map(function(p){ return p.linha; }).join(' + ') + '</small></td>'
+        + '<td class="raw" title="' + escapeHtml(pix.map(function(p){ return p.descricao; }).join(' | ')) + '">' + escapeHtml(pix.map(function(p){ return p.pagador; }).join(' | ')) + '</td>'
+        + '<td class="num">' + valorB + '</td><td>' + pixStatusHtml(linha.situacao, linha.atencao) + diff + '</td>';
+    }
+    var classe = linha.pendente ? 'has-divergence pix-row-bad' : linha.atencao ? 'has-divergence pix-row-warn' : linha.extra ? 'pix-row-extra' : '';
+    return '<tr data-linha="' + i + '" class="' + classe + '">' + a + b + '</tr>';
+  }).join('');
+  document.getElementById('btnPixPrev').hidden = !temProblema;
+  document.getElementById('btnPixNext').hidden = !temProblema;
+  pixNavIdx = -1;
+}
+
+var pixNavIdx = -1;
+function pixIrPara(tr){
+  if(!tr) return;
+  var container = document.getElementById('pixSourceScroll');
+  container.scrollTo({ top: tr.offsetTop - 82 - 4, behavior: 'smooth' });
+  tr.classList.add('pix-flash');
+  setTimeout(function(){ tr.classList.remove('pix-flash'); }, 1500);
+}
+function pixNavegar(direcao){
+  var rows = document.querySelectorAll('#pixSourceBody tr.has-divergence');
+  if(!rows.length) return;
+  pixNavIdx = (pixNavIdx + (direcao === 'next' ? 1 : -1) + rows.length) % rows.length;
+  pixIrPara(rows[pixNavIdx]);
+}
+
+document.getElementById('pixStoreSwitch').addEventListener('click', function(e){
+  var button = e.target.closest('[data-pix-loja]');
+  if(button) mostrarPixLoja(button.dataset.pixLoja, true);
+});
+document.getElementById('pixLojasBody').addEventListener('click', function(e){
+  var link = e.target.closest('[data-pix-loja]');
+  if(link){ mostrarPixLoja(link.dataset.pixLoja, false); document.getElementById('pixStoreSwitch').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+});
+document.getElementById('pixLojaConferir').addEventListener('click', function(e){
+  var ver = e.target.closest('[data-pix-ver]');
+  if(!ver) return;
+  selecionarPixAba('source');
+  var tr = document.querySelector('#pixSourceBody tr[data-linha="' + ver.dataset.pixVer + '"]');
+  requestAnimationFrame(function(){ pixIrPara(tr); });
+});
+document.querySelectorAll('[data-pix-tab]').forEach(function(button){
+  button.addEventListener('click', function(){ selecionarPixAba(button.dataset.pixTab); });
+  button.addEventListener('keydown', function(event){
+    if(!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    var tabs = Array.from(document.querySelectorAll('[data-pix-tab]'));
+    var index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (tabs.indexOf(button) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    selecionarPixAba(tabs[index].dataset.pixTab); tabs[index].focus();
+  });
+});
+document.getElementById('btnPixNext').addEventListener('click', function(){ pixNavegar('next'); });
+document.getElementById('btnPixPrev').addEventListener('click', function(){ pixNavegar('prev'); });
 
 function renderPixVendas(){
   if(!state.pix) return;
   var query = normalizeText(document.getElementById('pixSearch').value);
   var vendas = state.pix.vendas.filter(function(v){
-    if(state.pixFiltro === 'pending' && v.status === PIX_STATUS.conciliado) return false;
+    if(state.pixFiltro === 'pending' && v.status !== PIX_STATUS.naoEncontrado && !pixVendaAMenos(v)) return false;
     if(!query) return true;
     return normalizeText([v.id, storeName(v.loja), v.registro, v.documento, v.sit, pixReais(v.centavos), v.status, v.observacao, v.contaRecebida].concat(v.pix.map(function(p){ return p.pagador + ' ' + p.linha; })).join(' ')).includes(query);
   });
@@ -1780,7 +2009,7 @@ function renderPixVendas(){
   document.getElementById('pixVendasCount').textContent = vendas.length + ' de ' + state.pix.vendas.length + ' vendas';
   document.getElementById('pixVendasEmpty').hidden = vendas.length > 0;
   document.getElementById('pixVendasBody').innerHTML = vendas.map(function(v){
-    var bad = v.status === PIX_STATUS.naoEncontrado, warn = !bad && v.status !== PIX_STATUS.conciliado;
+    var bad = v.status === PIX_STATUS.naoEncontrado, warn = pixVendaAMenos(v);
     var outra = v.pix.length && v.contaRecebida !== v.conta ? '<span class="store-tag">conta da ' + escapeHtml(pixNomeConta(v.contaRecebida)) + '</span>' : '';
     var banco = v.pix.length
       ? '<span class="mono">' + escapeHtml(v.contaRecebida) + '</span>' + outra + '<small>' + escapeHtml(v.pix[0].arquivo) + ' · linha ' + v.pix.map(function(p){ return p.linha; }).join(' + ') + '</small><small>' + escapeHtml(v.pix.map(function(p){ return p.pagador; }).join(' | ')) + '</small>'
@@ -1791,8 +2020,8 @@ function renderPixVendas(){
       + '<td class="num">' + fmtBRL(v.centavos / 100) + '</td>'
       + '<td>' + banco + '</td>'
       + '<td class="num">' + (v.pix.length ? fmtBRL(v.banco / 100) : '—') + '</td>'
-      + '<td class="num ' + (v.diferenca === 0 ? 'diff-zero' : bad ? 'diff-neg' : 'pix-diff-warn') + '">' + pixDiferencaTexto(v.diferenca) + '</td>'
-      + '<td>' + pixStatusHtml(v.status) + (v.observacao ? '<small class="pix-obs">' + escapeHtml(v.observacao) + '</small>' : '') + '</td></tr>';
+      + '<td class="num ' + pixClasseDiferenca(v.diferenca, bad) + '">' + pixDiferencaTexto(v.diferenca) + '</td>'
+      + '<td>' + pixStatusHtml(v.status, warn) + (v.observacao ? '<small class="pix-obs">' + escapeHtml(v.observacao) + '</small>' : '') + '</td></tr>';
   }).join('');
 }
 document.querySelectorAll('[data-pix-filter]').forEach(function(b){ b.addEventListener('click', function(){ state.pixFiltro = b.dataset.pixFilter; renderPixVendas(); }); });

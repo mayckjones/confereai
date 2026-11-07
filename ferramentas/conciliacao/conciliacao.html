@@ -79,6 +79,9 @@
 
     <!-- RESULTADO PIX (Relação CARTEIRA DIGITAL × extratos Sicredi) -->
     <div id="view-pix" class="pix-view" hidden>
+      <div class="store-switch" id="pixStoreSwitch" role="group" aria-label="Escolher loja (PIX)"></div>
+
+      <div id="pixTodas">
       <div class="result-context"><span class="badge b-blue">Conciliação PIX</span><span>Relação de Vendas (Cart. Dig) × extratos Sicredi · só lançamentos RECEBIMENTO PIX</span></div>
       <div class="section-head">
         <h2>2. Visão geral PIX</h2>
@@ -131,32 +134,103 @@
       </div>
       <div class="panel detail-panel">
         <div class="detail-toolbar">
-          <div class="detail-filters" role="group" aria-label="Filtrar vendas PIX"><button class="active" data-pix-filter="pending" aria-pressed="true">Pendências e ressalvas</button><button data-pix-filter="all" aria-pressed="false">Todas</button></div>
+          <div class="detail-filters" role="group" aria-label="Filtrar vendas PIX"><button class="active" data-pix-filter="pending" aria-pressed="true">Pendências</button><button data-pix-filter="all" aria-pressed="false">Todas</button></div>
           <label class="detail-search"><span>Buscar</span><input id="pixSearch" type="search" placeholder="Registro, valor, pagador…"></label>
         </div>
         <div class="legend pix-legend">
-          <span><span class="sw" style="background:var(--red)"></span> Pendência: não encontrado ou sem venda</span>
-          <span><span class="sw" style="background:var(--amber)"></span> Ressalva: centavos ou outra conta</span>
-          <span><span class="sw" style="background:var(--green)"></span> Conciliado</span>
+          <span><span class="sw" style="background:var(--red)"></span> Pendência: venda do sistema sem Pix no extrato</span>
+          <span><span class="sw" style="background:var(--amber)"></span> Conferir: recebido até R$ 0,05 a menos</span>
+          <span><span class="sw" style="background:var(--green)"></span> Conciliado (inclui centavos a mais e Pix em outra conta)</span>
         </div>
         <div class="table-scroll"><table class="pix-sales-table"><thead><tr><th>Venda</th><th>Data · detalhes</th><th class="num">Sistema</th><th>Pix no extrato</th><th class="num">Banco</th><th class="num">Diferença</th><th>Status</th></tr></thead><tbody id="pixVendasBody"></tbody></table></div>
-        <div class="empty-state ok" id="pixVendasEmpty" hidden><h4>Nenhuma venda neste filtro</h4><p>As vendas deste filtro foram conciliadas sem ressalvas. Veja "Todas" para conferir cada uma.</p></div>
+        <div class="empty-state ok" id="pixVendasEmpty" hidden><h4>Nenhuma pendência</h4><p>Todas as vendas PIX do sistema foram encontradas nos extratos. Veja "Todas" para conferir cada uma.</p></div>
       </div>
 
-      <div class="section-head">
-        <h2>7. Pix no extrato sem venda no sistema</h2>
-        <span class="sub" id="pixSemVendaCount"></span>
-      </div>
-      <div class="panel">
+      <details class="detail-disclosure">
+        <summary>Pix a mais no extrato (sem venda no sistema) <span id="pixSemVendaCount"></span></summary>
+        <p class="detail-footnote">Não afeta a conciliação das vendas: é valor a mais na conta. Fica aqui só para consulta.</p>
         <div class="table-scroll" id="pixSemVendaWrap"><table class="pix-table"><thead><tr><th>ID</th><th>Conta</th><th>Extrato</th><th>Data</th><th>Pagador</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody id="pixSemVendaBody"></tbody></table></div>
-        <div class="empty-state ok" id="pixSemVendaEmpty" hidden><h4>Nenhum Pix sem venda</h4><p>Todos os Pix do período nos extratos têm venda correspondente no sistema.</p></div>
-      </div>
+        <div class="empty-state ok" id="pixSemVendaEmpty" hidden><h4>Nenhum Pix a mais</h4><p>Todos os Pix do período nos extratos têm venda correspondente no sistema.</p></div>
+      </details>
 
       <details class="detail-disclosure">
         <summary>Pix fora do período <span id="pixForaCount"></span></summary>
         <div class="table-scroll"><table class="pix-table"><thead><tr><th>ID</th><th>Conta</th><th>Extrato</th><th>Data</th><th>Pagador</th><th class="num">Valor</th></tr></thead><tbody id="pixForaBody"></tbody></table></div>
         <p class="detail-footnote">São de outra data (normalmente o dia seguinte, que o extrato também traz). Não entram na conciliação deste dia.</p>
       </details>
+      </div>
+
+      <!-- Uma loja: visão geral e vendas lidas lado a lado -->
+      <div id="pixLoja" hidden>
+        <div class="result-context"><span class="badge b-blue" id="pixLojaTitulo">PIX</span><span id="pixLojaSub"></span></div>
+        <div class="result-tabs" role="tablist" aria-label="Visões da loja (PIX)">
+          <button id="pixTab-overview" role="tab" aria-selected="true" aria-controls="pixLoja-overview" data-pix-tab="overview" class="active">Visão geral</button>
+          <button id="pixTab-source" role="tab" aria-selected="false" aria-controls="pixLoja-source" data-pix-tab="source" tabindex="-1">Vendas lidas <span id="pixSourceTabCount" hidden>0</span></button>
+        </div>
+
+        <div id="pixLoja-overview" role="tabpanel" aria-labelledby="pixTab-overview">
+          <div class="section-head">
+            <h2 id="pixLojaH2">2. Visão geral</h2>
+            <span class="sub" id="pixLojaRunLabel"></span>
+          </div>
+          <div class="metrics metrics-4" id="pixLojaMetrics"></div>
+
+          <div class="section-head">
+            <h2>3. Conta onde a loja recebe</h2>
+            <span class="sub" id="pixLojaContaSub"></span>
+          </div>
+          <div class="panel pix-conta-box" id="pixLojaConta"></div>
+
+          <div class="section-head">
+            <h2>4. O que conferir</h2>
+            <span class="sub" id="pixLojaConferirCount"></span>
+          </div>
+          <div class="panel">
+            <ul class="pix-conferir" id="pixLojaConferir"></ul>
+            <div class="empty-state ok" id="pixLojaConferirEmpty" hidden>
+              <div class="es-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <h4>Tudo conciliado nesta loja</h4>
+              <p>Cada venda PIX do sistema tem o seu Pix no extrato.</p>
+            </div>
+          </div>
+          <p class="pix-observacoes" id="pixLojaObs" hidden></p>
+        </div>
+
+        <div id="pixLoja-source" role="tabpanel" aria-labelledby="pixTab-source" hidden>
+          <div class="section-head">
+            <h2>5. Vendas lidas lado a lado</h2>
+            <span class="sub">Lado A e Lado B — somente na sua tela, nada é enviado</span>
+          </div>
+          <div class="panel">
+            <div class="panel-head" style="gap:10px; display:flex; align-items:center;">
+              <h3 style="flex:1;">Sistema × extrato, venda a venda</h3>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-ghost" id="btnPixPrev" style="padding: 6px 10px; font-size: 12px;" title="Pendência anterior">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </button>
+                <button class="btn btn-ghost" id="btnPixNext" style="padding: 6px 10px; font-size: 12px;" title="Próxima pendência">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                </button>
+              </div>
+              <span class="count" id="pixSourceCount">0 linhas</span>
+            </div>
+            <div class="source-note" id="pixSourceNote"></div>
+            <div class="legend pix-legend" style="padding-top:12px;">
+              <span><span class="sw" style="background:var(--red)"></span> Pendência: venda do sistema sem Pix no extrato</span>
+              <span><span class="sw" style="background:var(--amber)"></span> Conferir: recebido até R$ 0,05 a menos</span>
+              <span><span class="sw" style="background:var(--gray-400)"></span> Pix a mais no extrato (não afeta a conciliação)</span>
+              <span><span class="sw" style="background:var(--green)"></span> Conciliado</span>
+            </div>
+            <div class="source-compare pix-source" id="pixSourceScroll"><table>
+              <thead>
+                <tr><th colspan="6" class="group-a">A · Relação de Vendas (PDF)</th><th colspan="6" class="group-b side-divider" id="pixSourceBTitle">B · Extrato Sicredi</th></tr>
+                <tr><th>#</th><th>Venda</th><th>Hora</th><th>Sit</th><th class="num">Valor</th><th>Linha lida</th><th class="side-divider">#</th><th>Pix</th><th>Conta · linha</th><th>Pagador (extrato)</th><th class="num">Valor</th><th>Situação</th></tr>
+              </thead>
+              <tbody id="pixSourceBody"></tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="store-switch" id="storeSwitch" role="group" aria-label="Escolher loja" hidden></div>
