@@ -111,6 +111,7 @@ test('regras: valor exato, Dom na conta da Loja 5, pagamento dividido, centavos 
   assert.equal(porRegistro['12'].status, S.naoEncontrado, 'o único Pix de 10,00 da conta da Loja 1 já foi usado');
   assert.equal(porRegistro['11'].status, S.outraConta);
   assert.equal(porRegistro['11'].contaRecebida, '83679-6');
+  assert.match(porRegistro['11'].observacao, /recebida no extrato da Loja 5 \(extrato 83679-6\.xls · conta 83679-6 · linha 8\)/);
   assert.equal(porRegistro['20'].status, S.conciliado);
   assert.equal(porRegistro['70'].status, S.conciliado, 'a Loja 4 recebe na conta da Loja 2');
   assert.equal(porRegistro['70'].contaRecebida, '75073-5');
@@ -127,6 +128,8 @@ test('regras: valor exato, Dom na conta da Loja 5, pagamento dividido, centavos 
   const contas = Object.fromEntries(r.porConta.map(c => [c.conta, c]));
   assert.equal(contas['87041-2'].diferenca, -3000);
   assert.deepEqual(plain(contas['87041-2'].composicao.map(x => [x.tipo, x.valor])), [['outraConta', -2000], ['naoEncontradas', -1000]]);
+  assert.match(contas['87041-2'].composicao[0].texto, /Vendas desta loja que caíram no extrato de outra loja \(extrato da Loja 5 · extrato 83679-6\.xls\)/);
+  assert.match(contas['83679-6'].composicao[1].texto, /caíram neste extrato \(Loja 1: 1 venda\)/);
   assert.equal(contas['75073-5'].diferenca, 0);
   assert.equal(contas['75079-4'].diferenca, 5000);
   assert.equal(contas['83679-6'].diferenca, 2010);

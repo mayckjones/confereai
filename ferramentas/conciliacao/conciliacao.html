@@ -146,12 +146,15 @@
         <div class="empty-state ok" id="pixVendasEmpty" hidden><h4>Nenhuma pendência</h4><p>Todas as vendas PIX do sistema foram encontradas nos extratos. Veja "Todas" para conferir cada uma.</p></div>
       </div>
 
-      <details class="detail-disclosure">
-        <summary>Pix a mais no extrato (sem venda no sistema) <span id="pixSemVendaCount"></span></summary>
-        <p class="detail-footnote">Não afeta a conciliação das vendas: é valor a mais na conta. Fica aqui só para consulta.</p>
+      <div class="section-head pix-head-bad">
+        <h2>7. Pix a mais no extrato (sem venda no sistema)</h2>
+        <span class="sub" id="pixSemVendaCount"></span>
+      </div>
+      <div class="panel pix-panel-bad">
+        <p class="pix-panel-nota">Não muda o status da conciliação: as vendas do sistema continuam conciliadas. Fica em destaque para você conferir a origem desse valor.</p>
         <div class="table-scroll" id="pixSemVendaWrap"><table class="pix-table"><thead><tr><th>ID</th><th>Conta</th><th>Extrato</th><th>Data</th><th>Pagador</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody id="pixSemVendaBody"></tbody></table></div>
         <div class="empty-state ok" id="pixSemVendaEmpty" hidden><h4>Nenhum Pix a mais</h4><p>Todos os Pix do período nos extratos têm venda correspondente no sistema.</p></div>
-      </details>
+      </div>
 
       <details class="detail-disclosure">
         <summary>Pix fora do período <span id="pixForaCount"></span></summary>
@@ -194,11 +197,32 @@
             </div>
           </div>
           <p class="pix-observacoes" id="pixLojaObs" hidden></p>
+
+          <div id="pixLojaOutraWrap" hidden>
+            <div class="section-head">
+              <h2 id="pixLojaOutraTitulo">5. Pix em extrato de outra loja</h2>
+              <span class="sub" id="pixLojaOutraCount"></span>
+            </div>
+            <div class="panel pix-panel-info">
+              <ul class="pix-conferir" id="pixLojaOutra"></ul>
+            </div>
+          </div>
+
+          <div id="pixLojaExtraWrap" hidden>
+            <div class="section-head pix-head-bad">
+              <h2 id="pixLojaExtraTitulo">6. Pix a mais no extrato (sem venda no sistema)</h2>
+              <span class="sub" id="pixLojaExtraCount"></span>
+            </div>
+            <div class="panel pix-panel-bad">
+              <p class="pix-panel-nota" id="pixLojaExtraNota"></p>
+              <ul class="pix-conferir" id="pixLojaExtra"></ul>
+            </div>
+          </div>
         </div>
 
         <div id="pixLoja-source" role="tabpanel" aria-labelledby="pixTab-source" hidden>
           <div class="section-head">
-            <h2>5. Vendas lidas lado a lado</h2>
+            <h2>Vendas lidas lado a lado</h2>
             <span class="sub">Lado A e Lado B — somente na sua tela, nada é enviado</span>
           </div>
           <div class="panel">
@@ -218,7 +242,8 @@
             <div class="legend pix-legend" style="padding-top:12px;">
               <span><span class="sw" style="background:var(--red)"></span> Pendência: venda do sistema sem Pix no extrato</span>
               <span><span class="sw" style="background:var(--amber)"></span> Conferir: recebido até R$ 0,05 a menos</span>
-              <span><span class="sw" style="background:var(--gray-400)"></span> Pix a mais no extrato (não afeta a conciliação)</span>
+              <span><span class="sw" style="background:var(--red)"></span> Pix a mais no extrato (destaque; não muda o status)</span>
+              <span><span class="sw" style="background:var(--sky)"></span> Etiqueta azul: Pix em extrato de outra loja</span>
               <span><span class="sw" style="background:var(--green)"></span> Conciliado</span>
             </div>
             <div class="source-compare pix-source" id="pixSourceScroll"><table>

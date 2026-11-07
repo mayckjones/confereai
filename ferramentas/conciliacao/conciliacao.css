@@ -305,5 +305,10 @@
 .tool-conciliacao .pix-status.info{ background:var(--gray-100); color:var(--gray-700); }
 .tool-conciliacao .pix-diff-info{ color:var(--gray-700); }
 .tool-conciliacao .pix-composicao li.info b{ color:var(--gray-700); }
-.tool-conciliacao .pix-view tr.pix-row-extra td{ color:var(--gray-500); }
 .tool-conciliacao .pix-observacoes{ margin:12px 2px 0; font-size:12px; color:var(--gray-500); line-height:1.6; }
+.tool-conciliacao .pix-head-bad h2{ color:var(--red); }
+.tool-conciliacao .pix-panel-bad{ border:1px solid var(--red); box-shadow:inset 4px 0 0 var(--red), var(--shadow); }
+.tool-conciliacao .pix-panel-info{ box-shadow:inset 4px 0 0 var(--sky), var(--shadow); }
+.tool-conciliacao .pix-panel-nota{ margin:0; padding:14px 18px; font-size:12px; color:var(--gray-700); line-height:1.6; border-bottom:1px solid var(--gray-100); }
+.tool-conciliacao .pix-conferir li.info{ border-left-color:var(--sky); }
+.tool-conciliacao .pix-panel-bad .pix-conferir li.bad{ border-left-color:transparent; }
