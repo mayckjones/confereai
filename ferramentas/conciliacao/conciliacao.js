@@ -1039,7 +1039,8 @@ function reconcileStores(caixa, cieloTx, launchLines){
     return {
       loja: loja, nome: storeName(loja), caixa: sales, cielo: pool, lancamentos: storeLaunches, pairs: viewPairs,
       divergences: divergences, summary: summary, cardAudit: cardAudit, posFora: posFora, posRecebidas: posRecebidas,
-      diferencaFinal: (caixaCents - poolCents - foraCents + recebidasCents) / 100, semVendas: !sales.length
+      // Cielo − Relação, como no PIX: positivo = sobra na Cielo; negativo = falta na Cielo.
+      diferencaFinal: (poolCents + foraCents - recebidasCents - caixaCents) / 100, semVendas: !sales.length
     };
   });
 
@@ -2230,7 +2231,7 @@ function renderStoresOverview(){
       + '<td class="num">' + fmtBRL(pool) + '<small>' + v.cielo.length + ' vendas</small></td>'
       + '<td class="num">' + (v.posFora.length ? '+ ' + fmtBRL(fora) + '<small>' + v.posFora.length + ' venda(s) desta loja</small>' : '—') + '</td>'
       + '<td class="num">' + (v.posRecebidas.length ? '− ' + fmtBRL(rec) + '<small>' + escapeHtml(posOrigins(v.posRecebidas)) + '</small>' : '—') + '</td>'
-      + '<td class="num ' + diffClass + '">' + fmtBRL(v.diferencaFinal) + '</td>'
+      + '<td class="num ' + diffClass + '">' + (v.diferencaFinal > 0 ? '+' : '') + fmtBRL(v.diferencaFinal) + '</td>'
       + '<td>' + status + '</td></tr>';
   });
   m.semCielo.forEach(function(s){
@@ -2241,7 +2242,7 @@ function renderStoresOverview(){
       + '<td class="num">—</td><td class="num">—</td><td><span class="muted">Não conciliada</span></td></tr>');
   });
   document.getElementById('storesBody').innerHTML = rows.join('');
-  document.getElementById('storesFoot').innerHTML = views.length > 1 ? '<tr><td>Lojas conciliadas (' + views.length + ')</td><td class="num">' + fmtBRL(relCents / 100) + '</td><td class="num">' + fmtBRL(poolCents / 100) + '</td><td class="num">' + (foraCents ? '+ ' + fmtBRL(foraCents / 100) : '—') + '</td><td class="num">' + (recCents ? '− ' + fmtBRL(recCents / 100) : '—') + '</td><td class="num ' + (diffCents === 0 ? 'diff-zero' : 'diff-neg') + '">' + fmtBRL(diffCents / 100) + '</td><td></td></tr>' : '';
+  document.getElementById('storesFoot').innerHTML = views.length > 1 ? '<tr><td>Lojas conciliadas (' + views.length + ')</td><td class="num">' + fmtBRL(relCents / 100) + '</td><td class="num">' + fmtBRL(poolCents / 100) + '</td><td class="num">' + (foraCents ? '+ ' + fmtBRL(foraCents / 100) : '—') + '</td><td class="num">' + (recCents ? '− ' + fmtBRL(recCents / 100) : '—') + '</td><td class="num ' + (diffCents === 0 ? 'diff-zero' : 'diff-neg') + '">' + (diffCents > 0 ? '+' : '') + fmtBRL(diffCents / 100) + '</td><td></td></tr>' : '';
 
   var divTotal = views.reduce(function(n, v){ return n + v.divergences.length; }, 0);
   var cardTotal = views.reduce(function(n, v){ return n + (v.cardAudit && !v.cardAudit.blocked ? v.cardAudit.rows.filter(function(r){ return r.issues.length; }).length : 0); }, 0);
@@ -2350,9 +2351,10 @@ function renderResults(keepTab){
     } else if(row.info){
       tr.innerHTML = '<td><strong>' + row.modalidade + '</strong> <span style="font-size:11px;color:var(--gray-400);font-weight:500;">(sem comparação bancária)</span></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">—</td><td class="num diff-zero">—</td><td class="num">' + row.totalCaixaCount + '</td>';
     } else {
-      var diff = (cents(row.caixa) - cents(row.banco)) / 100;
-      var diffClass = Math.abs(diff) < 0.01 ? 'diff-zero' : (diff > 0 ? 'diff-neg' : 'diff-pos');
-      tr.innerHTML = '<td><strong>' + row.modalidade + '</strong></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">' + fmtBRL(row.banco) + '</td><td class="num ' + diffClass + '">' + fmtBRL(diff) + '</td><td class="num">' + row.batidos + '/' + row.totalCaixaCount + '</td>';
+      // Banco − Caixa: positivo = sobra no banco (verde); negativo = falta (vermelho).
+      var diff = (cents(row.banco) - cents(row.caixa)) / 100;
+      var diffClass = Math.abs(diff) < 0.01 ? 'diff-zero' : (diff < 0 ? 'diff-neg' : 'diff-pos');
+      tr.innerHTML = '<td><strong>' + row.modalidade + '</strong></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">' + fmtBRL(row.banco) + '</td><td class="num ' + diffClass + '">' + (diff > 0 ? '+' : '') + fmtBRL(diff) + '</td><td class="num">' + row.batidos + '/' + row.totalCaixaCount + '</td>';
       if(row.total) tr.className = 'summary-total';
     }
     summaryBody.appendChild(tr);
@@ -2590,10 +2592,10 @@ function posExportRows(){
 function storesExportRows(){
   var rows = state.multi.views.map(function(v){
     return { 'Loja': v.nome, 'Código no sistema': v.loja, 'Vendas Relação': v.caixa.length, 'Total Relação': sumValues(v.caixa), 'Vendas Cielo': v.cielo.length, 'Total Cielo da loja': sumValues(v.cielo),
-      'POS da loja na Cielo da Loja 5': pairsTotal(v.posFora), 'POS de outras lojas nesta Cielo': pairsTotal(v.posRecebidas), 'Diferença final': v.diferencaFinal, 'Divergências de valor': v.divergences.length, 'Situação': 'Conciliada' };
+      'POS da loja na Cielo da Loja 5': pairsTotal(v.posFora), 'POS de outras lojas nesta Cielo': pairsTotal(v.posRecebidas), 'Diferença final (Cielo − Relação)': v.diferencaFinal, 'Divergências de valor': v.divergences.length, 'Situação': 'Conciliada' };
   });
   state.multi.semCielo.forEach(function(s){
-    rows.push({ 'Loja': s.nome, 'Código no sistema': s.loja, 'Vendas Relação': s.vendas, 'Total Relação': s.total, 'Vendas Cielo': '', 'Total Cielo da loja': '', 'POS da loja na Cielo da Loja 5': pairsTotal(s.posFora), 'POS de outras lojas nesta Cielo': '', 'Diferença final': '', 'Divergências de valor': '', 'Situação': 'Não conciliada: ' + s.motivo });
+    rows.push({ 'Loja': s.nome, 'Código no sistema': s.loja, 'Vendas Relação': s.vendas, 'Total Relação': s.total, 'Vendas Cielo': '', 'Total Cielo da loja': '', 'POS da loja na Cielo da Loja 5': pairsTotal(s.posFora), 'POS de outras lojas nesta Cielo': '', 'Diferença final (Cielo − Relação)': '', 'Divergências de valor': '', 'Situação': 'Não conciliada: ' + s.motivo });
   });
   return rows;
 }
@@ -2658,13 +2660,13 @@ document.getElementById('btnExport').addEventListener('click', function(){
   XLSX.utils.book_append_sheet(wb, ws, 'Divergências');
 
   var summaryRows = [].concat.apply([], sources.map(function(src){ return src.summary.map(function(s){
-    if(s.ajuste) return withStore(src.loja, { 'Modalidade': s.modalidade, 'Total Caixa (R$)': '', 'Total Banco/Adquirente (R$)': Number(s.banco.toFixed(2)), 'Diferença (R$)': '', 'Transações batidas': s.qtd });
-    if(s.nota) return withStore(src.loja, { 'Modalidade': s.modalidade, 'Total Caixa (R$)': Number(s.caixa.toFixed(2)), 'Total Banco/Adquirente (R$)': '', 'Diferença (R$)': '', 'Transações batidas': s.qtd });
+    if(s.ajuste) return withStore(src.loja, { 'Modalidade': s.modalidade, 'Total Caixa (R$)': '', 'Total Banco/Adquirente (R$)': Number(s.banco.toFixed(2)), 'Diferença Banco − Caixa (R$)': '', 'Transações batidas': s.qtd });
+    if(s.nota) return withStore(src.loja, { 'Modalidade': s.modalidade, 'Total Caixa (R$)': Number(s.caixa.toFixed(2)), 'Total Banco/Adquirente (R$)': '', 'Diferença Banco − Caixa (R$)': '', 'Transações batidas': s.qtd });
     return withStore(src.loja, {
       'Modalidade': s.modalidade,
       'Total Caixa (R$)': Number(s.caixa.toFixed(2)),
       'Total Banco/Adquirente (R$)': Number(s.banco.toFixed(2)),
-      'Diferença (R$)': Number((s.caixa - s.banco).toFixed(2)),
+      'Diferença Banco − Caixa (R$)': Number((s.banco - s.caixa).toFixed(2)),
       'Transações batidas': s.batidos + '/' + s.totalCaixaCount
     });
   }); }));

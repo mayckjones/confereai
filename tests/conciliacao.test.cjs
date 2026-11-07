@@ -334,7 +334,8 @@ test('6 arquivos: vendas POS das lojas 1 e 4 caem na Cielo da Loja 5 e ficam exp
 
   assert.equal(l5.posRecebidas.length, 3);
   assert.match(l5.summary[1].modalidade, /Loja 1: 1 · Loja 4: 2/);
-  assert.equal(l5.diferencaFinal, -12);
+  // Cielo − Relação: a Cielo da Loja 5 tem R$ 12,00 a mais (118,97 × 108,97, sobra de 7,99 e falta de 5,99).
+  assert.equal(l5.diferencaFinal, 12);
   same(l5.divergences.map(d => [d.tipo, d.documento, d.valorCaixa, d.valorBanco]), [
     ['valor_divergente', '349379', 108.97, 118.97],
     ['ausente_banco', '349417', 5.99, null],
