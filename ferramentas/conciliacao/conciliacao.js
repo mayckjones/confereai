@@ -2218,7 +2218,7 @@ function renderStoresOverview(){
     var rel = sumValues(v.caixa), pool = sumValues(v.cielo), fora = pairsTotal(v.posFora), rec = pairsTotal(v.posRecebidas);
     relCents += cents(rel); poolCents += cents(pool); foraCents += cents(fora); recCents += cents(rec); diffCents += cents(v.diferencaFinal); salesCount += v.caixa.length;
     // Qualquer diferença depois de separar as vendas POS pede conferência.
-    var diffClass = cents(v.diferencaFinal) === 0 ? 'diff-zero' : 'diff-neg';
+    var diffClass = cents(v.diferencaFinal) === 0 ? 'diff-zero' : v.diferencaFinal > 0 ? 'diff-sobra' : 'diff-neg';
     var cardPending = v.cardAudit && !v.cardAudit.blocked ? v.cardAudit.rows.filter(function(r){ return r.issues.length; }).length : 0;
     var status = v.divergences.length
       ? '<span class="status-badge bad sm">' + v.divergences.length + ' divergência(s) de valor</span>'
@@ -2242,7 +2242,7 @@ function renderStoresOverview(){
       + '<td class="num">—</td><td class="num">—</td><td><span class="muted">Não conciliada</span></td></tr>');
   });
   document.getElementById('storesBody').innerHTML = rows.join('');
-  document.getElementById('storesFoot').innerHTML = views.length > 1 ? '<tr><td>Lojas conciliadas (' + views.length + ')</td><td class="num">' + fmtBRL(relCents / 100) + '</td><td class="num">' + fmtBRL(poolCents / 100) + '</td><td class="num">' + (foraCents ? '+ ' + fmtBRL(foraCents / 100) : '—') + '</td><td class="num">' + (recCents ? '− ' + fmtBRL(recCents / 100) : '—') + '</td><td class="num ' + (diffCents === 0 ? 'diff-zero' : 'diff-neg') + '">' + (diffCents > 0 ? '+' : '') + fmtBRL(diffCents / 100) + '</td><td></td></tr>' : '';
+  document.getElementById('storesFoot').innerHTML = views.length > 1 ? '<tr><td>Lojas conciliadas (' + views.length + ')</td><td class="num">' + fmtBRL(relCents / 100) + '</td><td class="num">' + fmtBRL(poolCents / 100) + '</td><td class="num">' + (foraCents ? '+ ' + fmtBRL(foraCents / 100) : '—') + '</td><td class="num">' + (recCents ? '− ' + fmtBRL(recCents / 100) : '—') + '</td><td class="num ' + (diffCents === 0 ? 'diff-zero' : diffCents > 0 ? 'diff-sobra' : 'diff-neg') + '">' + (diffCents > 0 ? '+' : '') + fmtBRL(diffCents / 100) + '</td><td></td></tr>' : '';
 
   var divTotal = views.reduce(function(n, v){ return n + v.divergences.length; }, 0);
   var cardTotal = views.reduce(function(n, v){ return n + (v.cardAudit && !v.cardAudit.blocked ? v.cardAudit.rows.filter(function(r){ return r.issues.length; }).length : 0); }, 0);
@@ -2351,9 +2351,9 @@ function renderResults(keepTab){
     } else if(row.info){
       tr.innerHTML = '<td><strong>' + row.modalidade + '</strong> <span style="font-size:11px;color:var(--gray-400);font-weight:500;">(sem comparação bancária)</span></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">—</td><td class="num diff-zero">—</td><td class="num">' + row.totalCaixaCount + '</td>';
     } else {
-      // Banco − Caixa: positivo = sobra no banco (verde); negativo = falta (vermelho).
+      // Banco − Caixa: positivo = sobra no banco (azul); negativo = falta (vermelho).
       var diff = (cents(row.banco) - cents(row.caixa)) / 100;
-      var diffClass = Math.abs(diff) < 0.01 ? 'diff-zero' : (diff < 0 ? 'diff-neg' : 'diff-pos');
+      var diffClass = Math.abs(diff) < 0.01 ? 'diff-zero' : (diff < 0 ? 'diff-neg' : 'diff-sobra');
       tr.innerHTML = '<td><strong>' + row.modalidade + '</strong></td><td class="num">' + fmtBRL(row.caixa) + '</td><td class="num">' + fmtBRL(row.banco) + '</td><td class="num ' + diffClass + '">' + (diff > 0 ? '+' : '') + fmtBRL(diff) + '</td><td class="num">' + row.batidos + '/' + row.totalCaixaCount + '</td>';
       if(row.total) tr.className = 'summary-total';
     }
