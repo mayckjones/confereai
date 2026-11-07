@@ -10,6 +10,8 @@ node --test "tests/*.test.cjs"
 
 Rode os testes depois de qualquer alteração em `ferramentas/` ou `js/`. Se algum falhar, informe a falha e não sugira commit.
 
+O teste da conciliação PIX (`tests/conciliacao-pix.test.cjs`) também lê os arquivos reais de `exemplos/pix-dia-05/` e confere o resultado com o gabarito. Essa pasta tem dados de clientes e fica fora do Git (`.gitignore`); sem ela, esses testes aparecem como pulados (skipped).
+
 Se mudar as colunas, exemplos ou instruções da planilha de etiquetas (`TEMPLATE_*` em `ferramentas/precificacao/precificacao.js`), gere de novo a planilha modelo com `node scripts/gerar-modelo-etiquetas.cjs`.
 
 ## Título e descrição do commit ao final de toda alteração

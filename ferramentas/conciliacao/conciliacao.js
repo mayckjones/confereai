@@ -22,7 +22,9 @@ var state = {
   alignedRows: [],
   processedOnce: false,
   multi: null,      // resultado por loja (Cielo); null no extrato PIX
-  storeKey: null    // 'todas' ou o código da loja exibida
+  storeKey: null,   // 'todas' ou o código da loja exibida
+  pix: null,        // resultado da conciliação PIX (Relação CARTEIRA DIGITAL × extratos Sicredi)
+  pixFiltro: 'pending'
 };
 
 // Cadastro de Cartões Magnéticos fornecido pelo sistema (código -> descrição).
@@ -1051,6 +1053,366 @@ function reconcileStores(caixa, cieloTx, launchLines){
 }
 
 /* =========================================================================
+   CONCILIAÇÃO PIX
+   Relação de Vendas emitida com CARTEIRA DIGITAL ("Cart. Dig" = Pix) × extratos
+   Sicredi, usando só os lançamentos RECEBIMENTO PIX. Cada loja recebe na própria
+   conta; a Loja 4 (código 7) não tem conta e recebe na conta da Loja 2; a conta
+   da Loja 5 (código 6) atende o delivery e pode receber vendas "Dom" das outras.
+   Valores em centavos. Status e regras seguem a conferência manual da planilha.
+   ========================================================================= */
+var PIX_CONTAS = [
+  { conta: '87041-2', lojas: ['1'] },
+  { conta: '75073-5', lojas: ['2', '7'] },
+  { conta: '75079-4', lojas: ['3'] },
+  { conta: '83679-6', lojas: ['6'] }
+];
+var PIX_CONTA_DELIVERY = '83679-6';
+var PIX_TOLERANCIA_CENTAVOS = 5;
+var PIX_STATUS = {
+  conciliado: 'CONCILIADO',
+  outraConta: 'CONCILIADO - CAIU NA CONTA DE OUTRA LOJA',
+  diferenca: 'CONCILIADO C/ DIFERENÇA',
+  naoEncontrado: 'NÃO ENCONTRADO NO EXTRATO',
+  semVenda: 'SEM VENDA NO SISTEMA',
+  foraDoPeriodo: 'FORA DO PERÍODO'
+};
+
+function pixLojas(){ return [].concat.apply([], PIX_CONTAS.map(function(c){ return c.lojas; })).sort(storeOrder); }
+function pixContaCadastrada(conta){ return PIX_CONTAS.find(function(c){ return c.conta === conta; }) || null; }
+function pixContaDaLoja(loja){ var c = PIX_CONTAS.find(function(x){ return x.lojas.includes(loja); }); return c ? c.conta : ''; }
+function pixNomeConta(conta){ var c = pixContaCadastrada(conta); return c ? c.lojas.slice().sort(storeOrder).map(storeName).join(' + ') : 'Conta ' + conta; }
+function pixContasTexto(){ return PIX_CONTAS.map(function(c){ return c.conta + ' (' + pixNomeConta(c.conta) + ')'; }).join(', '); }
+function pixReais(c){ return (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function pixId(prefixo, n){ return prefixo + String(n).padStart(3, '0'); }
+function pixSoma(lista, campo){ return lista.reduce(function(s, x){ return s + x[campo || 'centavos']; }, 0); }
+function pixPeriodoTexto(p){ return p.inicio === p.fim ? formatDateBR(p.inicio) : formatDateBR(p.inicio) + ' a ' + formatDateBR(p.fim); }
+
+// Relação do PIX: cabeçalho "Forma Pagto.: CARTEIRA DIGITAL" ou vendas só em "Cart. Dig".
+function isRelacaoPix(lines){
+  if(/FORMA PAGTO\.?\s*:?\s*CARTEIRA DIGITAL/.test(normalizeText(lines.slice(0, 15).join(' ')))) return true;
+  var pix = 0, outras = 0;
+  lines.forEach(function(line){
+    if(!/\d{2}\/\d{2}\/\d{4}\s+\d{1,2}:\d{2}/.test(line)) return;
+    if(/\bCART\.?\s*DIG\b/i.test(line)) pix++; else outras++;
+  });
+  return pix > 0 && outras === 0;
+}
+
+// Vendas "Cart. Dig" por loja, com página, Sit (Bal/Dom) e conferência do "Total da Loja".
+function parseRelacaoPix(lines){
+  var valor = '(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})';
+  var vendaRe = new RegExp('^(\\d+)\\s+([A-Za-z]{2,4})\\s+(?:(\\S+)\\s+)?(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{1,2}:\\d{2})(?::\\d{2})?\\s+(\\d+)\\s*/\\s*(\\d+)\\s+(\\d+)\\s+(\\S*%)\\s+(.+?)\\s+' + valor + '$');
+  var adicionalRe = new RegExp('^Cart\\.?\\s*Dig\\.?\\s+' + valor + '$', 'i');
+  var vendas = [], lojas = new Map(), avisos = [], ignoradas = 0;
+  var pagina = 1, loja = null, periodo = null, formaPagamento = '', totalGeral = null, ultima = null;
+
+  function registrar(venda){
+    venda.centavos = cents(venda.valor);
+    venda.delivery = /^DOM$/i.test(venda.sit);
+    venda.ordem = vendas.length;
+    vendas.push(venda);
+    loja.totalLido += venda.centavos;
+    loja.vendas++;
+  }
+
+  lines.forEach(function(line){
+    var t = String(line || '').trim(), m;
+    if((m = t.match(/Pagina\s*:\s*(\d+)/i))) pagina = Number(m[1]);
+    if(!periodo && (m = t.match(/Per[ií]odo\s*:\s*(\d{2}\/\d{2}\/\d{2,4})\s*a\s*(\d{2}\/\d{2}\/\d{2,4})/i))) periodo = { inicio: parseDateAny(m[1]), fim: parseDateAny(m[2]) };
+    if(!formaPagamento && (m = t.match(/Forma Pagto\.?\s*:\s*(.+?)(?:\s+-\s+<[^>]*>)?\s*$/i))) formaPagamento = m[1].trim();
+    if((m = t.match(/^(\d+)\s*-\s*(LOJA\b.*)$/i))){
+      if(!lojas.has(m[1])) lojas.set(m[1], { codigo: m[1], nomePdf: m[1] + '-' + m[2].trim(), totalImpresso: null, totalLido: 0, vendas: 0 });
+      loja = lojas.get(m[1]); ultima = null; return;
+    }
+    if((m = t.match(/Total da Loja[\s.]*:\s*(-?[\d.]+,\d{2})/i))){ if(loja) loja.totalImpresso = cents(parseValorBR(m[1])); ultima = null; return; }
+    if((m = t.match(/Total Geral[\s.]*:\s*(-?[\d.]+,\d{2})/i))){ totalGeral = cents(parseValorBR(m[1])); ultima = null; return; }
+    if((m = t.match(vendaRe))){
+      if(!/^CART\.?\s*DIG\.?$/i.test(m[11].trim())){ ignoradas++; ultima = null; return; }
+      if(!loja) throw new Error('A Relação tem venda PIX antes do nome da loja. Confira o layout do PDF.');
+      ultima = { loja: loja.codigo, lojaPdf: loja.nomePdf, pagina: pagina, registro: m[1], sit: m[2], bd: m[3] || '', documento: m[4], data: parseDateAny(m[5]), hora: parseTimeAny(m[6]), caixaTurno: m[7] + '/' + m[8], vendedor: m[9], valor: parseValorBR(m[12]), pagamentoAdicional: false, raw: t };
+      registrar(ultima);
+      return;
+    }
+    // "Cart. Dig 20,00" sem registro: outro Pix da venda anterior.
+    if(ultima && (m = t.match(adicionalRe))){
+      registrar(Object.assign({}, ultima, { pagina: pagina, valor: parseValorBR(m[1]), pagamentoAdicional: true, raw: t }));
+    }
+  });
+
+  if(!vendas.length) throw new Error('Nenhuma venda "Cart. Dig" foi reconhecida na Relação de Vendas. Emita o relatório com Forma Pagto. CARTEIRA DIGITAL.');
+  var semConta = Array.from(lojas.values()).filter(function(l){ return l.vendas && !pixContaDaLoja(l.codigo); });
+  if(semConta.length) throw new Error('A Relação tem vendas PIX de ' + semConta.map(function(l){ return l.nomePdf; }).join(', ') + ', sem conta PIX cadastrada. Contas cadastradas: ' + pixContasTexto() + '.');
+  lojas.forEach(function(l){
+    if(!l.vendas && l.totalImpresso === null) return;
+    var nome = storeName(l.codigo) + ' (' + l.nomePdf + ')';
+    if(l.totalImpresso === null) avisos.push('A ' + nome + ' não tem a linha "Total da Loja" no PDF. Confira se o relatório veio completo.');
+    else if(l.totalImpresso !== l.totalLido) avisos.push('A soma das vendas PIX lidas da ' + nome + ' é R$ ' + pixReais(l.totalLido) + ', mas o "Total da Loja" do PDF é R$ ' + pixReais(l.totalImpresso) + '. Confira o PDF antes de usar o resultado desta loja.');
+  });
+  var totalLido = pixSoma(vendas);
+  if(totalGeral !== null && totalGeral !== totalLido) avisos.push('A soma de todas as vendas PIX lidas é R$ ' + pixReais(totalLido) + ', mas o "Total Geral" do PDF é R$ ' + pixReais(totalGeral) + '.');
+  if(ignoradas) avisos.push(ignoradas + ' venda(s) com outra forma de pagamento foram ignoradas: a conciliação PIX usa só as vendas "Cart. Dig".');
+  if(formaPagamento && !/CARTEIRA DIGITAL/i.test(formaPagamento)) avisos.push('A Relação foi emitida com Forma Pagto. "' + formaPagamento + '". Para o PIX, emita com CARTEIRA DIGITAL.');
+  if(!periodo){
+    var datas = uniqueSorted(vendas.map(function(v){ return v.data; }));
+    periodo = { inicio: datas[0], fim: datas[datas.length - 1] };
+  }
+  // IDs como na planilha de conferência: por loja (1 a 5) e na ordem do PDF.
+  vendas.sort(function(a, b){ return storeOrder(a.loja, b.loja) || a.ordem - b.ordem; });
+  vendas.forEach(function(v, i){ v.id = pixId('S', i + 1); });
+  return {
+    vendas: vendas,
+    lojas: Array.from(lojas.values()).sort(function(a, b){ return storeOrder(a.codigo, b.codigo); }),
+    periodo: periodo, formaPagamento: formaPagamento, totalLido: totalLido, totalGeralImpresso: totalGeral, avisos: avisos
+  };
+}
+
+// Extrato Sicredi: conta pela célula "Conta:", só "RECEBIMENTO PIX" (pela descrição,
+// não pelo documento, que pode vir cortado como "PIX_CRE") e número da linha no Excel.
+function parseExtratoPix(matrix, opcoes){
+  opcoes = opcoes || {};
+  var arquivo = opcoes.arquivo || 'extrato', primeiraLinha = opcoes.primeiraLinha || 1;
+  var conta = '', associado = '', periodo = null;
+  function texto(c){ return String(c == null ? '' : c).trim(); }
+  function aoLado(row, i){ for(var j = i + 1; j < row.length; j++){ if(texto(row[j])) return texto(row[j]); } return ''; }
+  matrix.slice(0, 40).forEach(function(row){
+    (row || []).forEach(function(cell, i){
+      var t = normalizeText(cell), m;
+      if(!conta && /^CONTA\s*:?$/.test(t)) conta = aoLado(row, i);
+      if(!associado && /^ASSOCIADO\s*:?$/.test(t)) associado = aoLado(row, i);
+      if(!periodo && (m = texto(cell).match(/per[ií]odo de (\d{2}\/\d{2}\/\d{4}) a (\d{2}\/\d{2}\/\d{4})/i))) periodo = { inicio: parseDateAny(m[1]), fim: parseDateAny(m[2]) };
+    });
+  });
+  var headerIdx = findPixHeaderRow(matrix);
+  if(headerIdx === -1) throw new Error('O arquivo "' + arquivo + '" não parece um extrato Sicredi: falta o cabeçalho "Data | Descrição | Documento | Valor".');
+  if(!conta) throw new Error('Não achei o número da conta (linha "Conta:") no extrato "' + arquivo + '".');
+  var header = matrix[headerIdx];
+  var colData = findColIndex(header, ['data']), colDesc = findColIndex(header, ['descri', 'hist']);
+  var colDoc = findColIndex(header, ['documento', 'doc']), colValor = findColIndex(header, ['valor']);
+  if(colData === -1 || colDesc === -1 || colValor === -1) throw new Error('O extrato "' + arquivo + '" não tem as colunas Data, Descrição e Valor.');
+  var pix = [], ultimaData = null;
+  for(var i = headerIdx + 1; i < matrix.length; i++){
+    var row = matrix[i] || [];
+    var primeira = normalizeText(row.find(function(c){ return texto(c); }) || '');
+    if(/^(SALDO DA CONTA|LANCAMENTOS FUTUROS)/.test(primeira)) break;
+    var data = parseDateAny(row[colData]);
+    if(data) ultimaData = data;
+    var descricao = texto(row[colDesc]);
+    if(!/^RECEBIMENTO PIX\b/.test(normalizeText(descricao))) continue;
+    var valor = parseValorBR(row[colValor]);
+    if(!Number.isFinite(valor) || valor <= 0) continue;
+    var pagador = descricao.replace(/^\s*RECEBIMENTO\s+PIX\s*/i, '').trim();
+    var doc = pagador.match(/^(\d{11}|\d{14})\b\s*(.*)$/);
+    pix.push({
+      arquivo: arquivo, conta: conta, linha: primeiraLinha + i, data: data || ultimaData,
+      descricao: descricao, pagador: pagador, pagadorDoc: doc ? doc[1] : '', pagadorNome: doc ? doc[2].trim() : pagador,
+      documento: colDoc !== -1 ? texto(row[colDoc]) : '', valor: valor, centavos: cents(valor)
+    });
+  }
+  return { arquivo: arquivo, conta: conta, associado: associado, periodo: periodo, pix: pix };
+}
+
+// Cada Pix é usado uma vez, só no período da Relação e na data da venda. Ordem:
+// valor exato na conta da loja → venda "Dom" na conta da Loja 5 → dois Pix do mesmo
+// pagador somando o valor → um Pix com até 5 centavos de diferença → dois Pix com até
+// 5 centavos. Vendas em ordem de hora e Pix em ordem de linha desempatam valores iguais.
+function conciliarPix(relacao, extratos){
+  var avisos = relacao.avisos.slice(), periodo = relacao.periodo, porConta = new Map();
+  extratos.forEach(function(ex){
+    if(!pixContaCadastrada(ex.conta)) throw new Error('O extrato "' + ex.arquivo + '" é da conta ' + ex.conta + ', que não está no cadastro PIX. Contas cadastradas: ' + pixContasTexto() + '.');
+    if(porConta.has(ex.conta)) throw new Error('Foram enviados dois extratos da conta ' + ex.conta + ' (' + porConta.get(ex.conta).arquivo + ' e ' + ex.arquivo + ').');
+    porConta.set(ex.conta, ex);
+  });
+  PIX_CONTAS.forEach(function(c){
+    var ex = porConta.get(c.conta);
+    if(!ex) avisos.push('Falta o extrato da conta ' + c.conta + ' (' + pixNomeConta(c.conta) + '): as vendas dessas lojas ficam como não encontradas.');
+    else if(ex.periodo && (ex.periodo.inicio > periodo.inicio || ex.periodo.fim < periodo.fim)) avisos.push('O extrato da conta ' + c.conta + ' (' + ex.arquivo + ') vai de ' + pixPeriodoTexto(ex.periodo) + ' e não cobre a data da Relação (' + pixPeriodoTexto(periodo) + ').');
+  });
+  function noPeriodo(data){ return !!data && data >= periodo.inicio && data <= periodo.fim; }
+
+  var pix = [];
+  PIX_CONTAS.forEach(function(c){
+    var ex = porConta.get(c.conta);
+    if(ex) ex.pix.slice().sort(function(a, b){ return a.linha - b.linha; }).forEach(function(p){ pix.push(Object.assign({}, p, { venda: null })); });
+  });
+  pix.forEach(function(p, i){ p.id = pixId('E', i + 1); p.noPeriodo = noPeriodo(p.data); });
+
+  var vendas = relacao.vendas.map(function(v){ return Object.assign({}, v, { conta: pixContaDaLoja(v.loja), pix: [] }); });
+  var fila = vendas.slice().sort(function(a, b){ return (a.data + (a.hora || '')).localeCompare(b.data + (b.hora || '')) || a.id.localeCompare(b.id); });
+
+  function livres(conta, data){ return pix.filter(function(p){ return p.noPeriodo && !p.venda && p.conta === conta && p.data === data; }); }
+  function pagador(p){ return p.pagadorDoc || normalizeText(p.pagadorNome); }
+  function umPix(venda, conta, tolerancia){
+    var opcoes = livres(conta, venda.data).filter(function(p){ return Math.abs(p.centavos - venda.centavos) <= tolerancia; });
+    opcoes.sort(function(a, b){ return Math.abs(a.centavos - venda.centavos) - Math.abs(b.centavos - venda.centavos) || a.linha - b.linha; });
+    return opcoes.length ? [opcoes[0]] : null;
+  }
+  function doisPix(venda, conta, tolerancia){
+    var lista = livres(conta, venda.data), melhor = null;
+    for(var i = 0; i < lista.length; i++){
+      for(var j = i + 1; j < lista.length; j++){
+        var a = lista[i], b = lista[j];
+        if(!pagador(a) || pagador(a) !== pagador(b)) continue;
+        var dif = Math.abs(a.centavos + b.centavos - venda.centavos);
+        if(dif <= tolerancia && (!melhor || dif < melhor.dif)) melhor = { par: [a, b], dif: dif };
+      }
+    }
+    return melhor ? melhor.par : null;
+  }
+  function etapa(buscar, tolerancia, naContaDoDelivery){
+    fila.forEach(function(venda){
+      if(venda.pix.length || !venda.conta) return;
+      var conta = venda.conta;
+      if(naContaDoDelivery){
+        if(!venda.delivery || venda.conta === PIX_CONTA_DELIVERY) return;
+        conta = PIX_CONTA_DELIVERY;
+      }
+      var achados = buscar(venda, conta, tolerancia);
+      if(achados){ achados.forEach(function(p){ p.venda = venda; }); venda.pix = achados; }
+    });
+  }
+  etapa(umPix, 0, false); etapa(umPix, 0, true);
+  etapa(doisPix, 0, false); etapa(doisPix, 0, true);
+  etapa(umPix, PIX_TOLERANCIA_CENTAVOS, false); etapa(umPix, PIX_TOLERANCIA_CENTAVOS, true);
+  etapa(doisPix, PIX_TOLERANCIA_CENTAVOS, false); etapa(doisPix, PIX_TOLERANCIA_CENTAVOS, true);
+
+  vendas.forEach(function(v){
+    if(!v.pix.length){
+      v.status = PIX_STATUS.naoEncontrado; v.banco = 0; v.diferenca = -v.centavos; v.contaRecebida = '';
+      v.observacao = 'Nenhum Pix de ' + pixReais(v.centavos) + ' livre na conta ' + v.conta + ' (' + pixNomeConta(v.conta) + ')'
+        + (v.delivery && v.conta !== PIX_CONTA_DELIVERY ? ' nem na conta do delivery ' + PIX_CONTA_DELIVERY + ' (' + pixNomeConta(PIX_CONTA_DELIVERY) + ')' : '')
+        + ' em ' + formatDateBR(v.data) + '.';
+      return;
+    }
+    v.banco = pixSoma(v.pix); v.diferenca = v.banco - v.centavos; v.contaRecebida = v.pix[0].conta;
+    var partes = [], linhas = v.pix.map(function(p){ return p.linha; }).join(' + ');
+    var recebido = v.pix.length > 1 ? 'Pago em ' + v.pix.length + ' Pix do mesmo pagador (' + v.pix.map(function(p){ return pixReais(p.centavos); }).join(' + ') + ' = ' + pixReais(v.banco) + ')' : 'Pix de ' + pixReais(v.banco);
+    if(v.diferenca) partes.push(recebido + ' para venda de ' + pixReais(v.centavos) + ': recebido ' + pixReais(Math.abs(v.diferenca)) + (v.diferenca > 0 ? ' a mais' : ' a menos'));
+    else if(v.pix.length > 1) partes.push(recebido);
+    if(v.contaRecebida !== v.conta) partes.push('Venda da ' + storeName(v.loja) + (v.delivery ? ' (delivery)' : '') + ' recebida na conta da ' + pixNomeConta(v.contaRecebida) + ' (' + v.contaRecebida + ', linha ' + linhas + ')');
+    v.status = v.diferenca ? PIX_STATUS.diferenca : v.contaRecebida !== v.conta ? PIX_STATUS.outraConta : PIX_STATUS.conciliado;
+    v.observacao = partes.length ? partes.join('. ') + '.' : '';
+  });
+  pix.forEach(function(p){ p.situacao = !p.noPeriodo ? PIX_STATUS.foraDoPeriodo : p.venda ? PIX_STATUS.conciliado : PIX_STATUS.semVenda; });
+
+  var porLoja = pixLojas().map(function(loja){
+    var vs = vendas.filter(function(v){ return v.loja === loja; });
+    var conc = vs.filter(function(v){ return v.pix.length; }), nao = vs.filter(function(v){ return !v.pix.length; });
+    var info = relacao.lojas.find(function(l){ return l.codigo === loja; }), conta = pixContaDaLoja(loja);
+    var totalSistema = pixSoma(vs), totalBanco = pixSoma(conc, 'banco');
+    return {
+      loja: loja, nome: storeName(loja), nomePdf: info ? info.nomePdf : '', conta: conta, arquivo: porConta.has(conta) ? porConta.get(conta).arquivo : '',
+      qtdVendas: vs.length, totalSistema: totalSistema, qtdConciliadas: conc.length, totalBanco: totalBanco, diferenca: totalBanco - totalSistema,
+      qtdNaoEncontradas: nao.length, valorNaoEncontrado: pixSoma(nao), qtdRessalvas: conc.filter(function(v){ return v.status !== PIX_STATUS.conciliado; }).length,
+      situacao: !vs.length ? 'SEM VENDAS PIX' : nao.length ? 'PENDENTE' : conc.every(function(v){ return v.status === PIX_STATUS.conciliado; }) ? '100% CONCILIADO' : 'CONCILIADO C/ RESSALVAS'
+    };
+  });
+
+  // Diferença da conta = Pix do período na conta − vendas das lojas que recebem nela.
+  var contas = PIX_CONTAS.map(function(c){
+    var ex = porConta.get(c.conta), daConta = pix.filter(function(p){ return p.conta === c.conta; });
+    var noDia = daConta.filter(function(p){ return p.noPeriodo; }), fora = daConta.filter(function(p){ return !p.noPeriodo; });
+    var conc = noDia.filter(function(p){ return p.venda; }), sem = noDia.filter(function(p){ return !p.venda; });
+    var proprias = vendas.filter(function(v){ return c.lojas.includes(v.loja); });
+    var aqui = proprias.filter(function(v){ return v.pix.length && v.contaRecebida === c.conta; });
+    var emOutra = proprias.filter(function(v){ return v.pix.length && v.contaRecebida !== c.conta; });
+    var nao = proprias.filter(function(v){ return !v.pix.length; });
+    var deOutras = vendas.filter(function(v){ return !c.lojas.includes(v.loja) && v.pix.length && v.contaRecebida === c.conta; });
+    var origem = uniqueSorted(deOutras.map(function(v){ return v.loja; })).sort(storeOrder).map(function(l){ var n = deOutras.filter(function(v){ return v.loja === l; }).length; return storeName(l) + ': ' + n + (n === 1 ? ' venda' : ' vendas'); }).join(' · ');
+    var destino = uniqueSorted(emOutra.map(function(v){ return v.contaRecebida; })).map(function(x){ return 'conta da ' + pixNomeConta(x); }).join(', ');
+    var composicao = [
+      { tipo: 'centavos', texto: 'Diferenças de centavos nas vendas conciliadas', valor: pixSoma(aqui, 'diferenca'), qtd: aqui.filter(function(v){ return v.diferenca; }).length },
+      { tipo: 'outrasLojas', texto: 'Pix de vendas de outras lojas que caíram nesta conta' + (origem ? ' (' + origem + ')' : ''), valor: pixSoma(deOutras, 'banco'), qtd: deOutras.length },
+      { tipo: 'semVenda', texto: 'Pix sem venda no sistema', valor: pixSoma(sem), qtd: sem.length },
+      { tipo: 'outraConta', texto: 'Vendas destas lojas que caíram em outra conta' + (destino ? ' (' + destino + ')' : ''), valor: -pixSoma(emOutra), qtd: emOutra.length },
+      { tipo: 'naoEncontradas', texto: 'Vendas não encontradas no extrato', valor: -pixSoma(nao), qtd: nao.length }
+    ].filter(function(x){ return x.qtd > 0; });
+    var totalPeriodo = pixSoma(noDia), totalSistema = pixSoma(proprias);
+    return {
+      conta: c.conta, lojas: c.lojas.slice(), nome: pixNomeConta(c.conta), arquivo: ex ? ex.arquivo : '', enviado: !!ex,
+      qtdPeriodo: noDia.length, totalPeriodo: totalPeriodo, qtdConciliados: conc.length, totalConciliado: pixSoma(conc),
+      qtdSemVenda: sem.length, valorSemVenda: pixSoma(sem), qtdFora: fora.length, valorFora: pixSoma(fora),
+      qtdVendasSistema: proprias.length, totalSistema: totalSistema, diferenca: totalPeriodo - totalSistema, composicao: composicao
+    };
+  });
+
+  var conciliadas = vendas.filter(function(v){ return v.pix.length; });
+  var naoEncontradas = vendas.filter(function(v){ return !v.pix.length; });
+  var semVenda = pix.filter(function(p){ return p.situacao === PIX_STATUS.semVenda; });
+  var ponte = {
+    totalSistema: pixSoma(vendas), centavos: pixSoma(conciliadas, 'diferenca'), semVenda: pixSoma(semVenda),
+    naoEncontradas: pixSoma(naoEncontradas), totalExtratos: pixSoma(pix.filter(function(p){ return p.noPeriodo; }))
+  };
+  ponte.esperado = ponte.totalSistema + ponte.centavos + ponte.semVenda - ponte.naoEncontradas;
+  ponte.checagem = ponte.totalExtratos - ponte.esperado;
+
+  function contar(lista, campo){ var out = {}; lista.forEach(function(x){ out[x[campo]] = (out[x[campo]] || 0) + 1; }); return out; }
+  return {
+    periodo: periodo, vendas: vendas, pix: pix, porLoja: porLoja, porConta: contas, ponte: ponte,
+    naoEncontradas: naoEncontradas, semVenda: semVenda, foraDoPeriodo: pix.filter(function(p){ return !p.noPeriodo; }),
+    ressalvas: conciliadas.filter(function(v){ return v.status !== PIX_STATUS.conciliado; }),
+    contagem: { vendas: contar(vendas, 'status'), pix: contar(pix, 'situacao') },
+    avisos: avisos
+  };
+}
+
+// Abas do Excel exportado, no formato da planilha de conferência (valores em reais).
+function planilhasPix(r){
+  function reais(c){ return Math.round(c) / 100; }
+  function linhasPix(v){ return v.pix.map(function(p){ return p.linha; }).join(' + '); }
+  var resumo = [
+    ['CONCILIAÇÃO PIX — Sistema (Relação de Vendas por Período, Cart. Dig) × Extratos Sicredi'],
+    ['Data conciliada', pixPeriodoTexto(r.periodo)],
+    [],
+    ['Resumo por loja'],
+    ['Loja', 'Nome no relatório (PDF)', 'Conta onde cai o Pix', 'Extrato', 'Qtd vendas sistema', 'Total sistema (R$)', 'Qtd conciliadas', 'Total banco conciliado (R$)', 'Diferença Banco − Sistema (R$)', 'Qtd não encontradas no extrato', 'Valor não encontrado (R$)', 'Situação']
+  ];
+  r.porLoja.forEach(function(l){ resumo.push([l.nome, l.nomePdf, l.conta + ' (' + pixNomeConta(l.conta) + ')', l.arquivo, l.qtdVendas, reais(l.totalSistema), l.qtdConciliadas, reais(l.totalBanco), reais(l.diferenca), l.qtdNaoEncontradas, reais(l.valorNaoEncontrado), l.situacao]); });
+  resumo.push(['TOTAL', '', '', '', pixSoma(r.porLoja, 'qtdVendas'), reais(pixSoma(r.porLoja, 'totalSistema')), pixSoma(r.porLoja, 'qtdConciliadas'), reais(pixSoma(r.porLoja, 'totalBanco')), reais(pixSoma(r.porLoja, 'diferenca')), pixSoma(r.porLoja, 'qtdNaoEncontradas'), reais(pixSoma(r.porLoja, 'valorNaoEncontrado')), '']);
+  resumo.push([], ['Resumo por conta bancária'], ['Conta', 'Lojas que recebem nesta conta', 'Extrato', 'Qtd Pix no período', 'Total Pix no período (R$)', 'Vendas do sistema dessas lojas (R$)', 'Diferença Banco − Sistema (R$)', 'De onde vem a diferença', 'Qtd Pix conciliados', 'Total Pix conciliado (R$)', 'Qtd Pix sem venda', 'Valor Pix sem venda (R$)', 'Qtd Pix fora do período', 'Valor Pix fora do período (R$)']);
+  r.porConta.forEach(function(c){
+    var explicacao = c.composicao.map(function(x){ return (x.valor < 0 ? '− ' : '+ ') + pixReais(Math.abs(x.valor)) + ' ' + x.texto; }).join('; ');
+    resumo.push([c.conta, c.nome, c.arquivo || 'não enviado', c.qtdPeriodo, reais(c.totalPeriodo), reais(c.totalSistema), reais(c.diferenca), explicacao, c.qtdConciliados, reais(c.totalConciliado), c.qtdSemVenda, reais(c.valorSemVenda), c.qtdFora, reais(c.valorFora)]);
+  });
+  resumo.push(['TOTAL', '', '', pixSoma(r.porConta, 'qtdPeriodo'), reais(pixSoma(r.porConta, 'totalPeriodo')), reais(pixSoma(r.porConta, 'totalSistema')), reais(pixSoma(r.porConta, 'diferenca')), '', pixSoma(r.porConta, 'qtdConciliados'), reais(pixSoma(r.porConta, 'totalConciliado')), pixSoma(r.porConta, 'qtdSemVenda'), reais(pixSoma(r.porConta, 'valorSemVenda')), pixSoma(r.porConta, 'qtdFora'), reais(pixSoma(r.porConta, 'valorFora'))]);
+  var p = r.ponte;
+  resumo.push([], ['Ponte Sistema × Banco (período)'],
+    ['Total vendas PIX no sistema', reais(p.totalSistema)],
+    ['(+) Diferenças de centavos nas vendas conciliadas', reais(p.centavos)],
+    ['(+) Pix no banco sem venda no sistema', reais(p.semVenda)],
+    ['(−) Vendas não encontradas no extrato', reais(-p.naoEncontradas)],
+    ['(=) Total Pix esperado nos extratos', reais(p.esperado)],
+    ['Total Pix nos extratos (período)', reais(p.totalExtratos)],
+    ['Checagem (deve ser 0)', reais(p.checagem)]);
+  if(r.avisos.length){ resumo.push([], ['Avisos']); r.avisos.forEach(function(a){ resumo.push([a]); }); }
+
+  var detalhe = [['ID Venda', 'Loja', 'Loja no relatório (PDF)', 'Página PDF', 'Registro', 'Sit', 'Documento', 'Data', 'Hora', 'Cx/Tu', 'Vendedor', 'Valor sistema (R$)', 'Conta do Pix', 'Extrato (arquivo)', 'Linha(s) no extrato', 'Pagador (descrição do extrato)', 'Valor banco (R$)', 'Diferença Banco − Sistema (R$)', 'Status', 'Observação']];
+  r.vendas.forEach(function(v){
+    detalhe.push([v.id, storeName(v.loja), v.lojaPdf, v.pagina, v.registro, v.sit, v.documento, formatDateBR(v.data), v.hora || '', v.caixaTurno, v.vendedor, reais(v.centavos),
+      v.contaRecebida || '', v.pix.length ? v.pix[0].arquivo : '', linhasPix(v), v.pix.map(function(x){ return x.pagador; }).join(' | '), reais(v.banco), reais(v.diferenca), v.status, v.observacao]);
+  });
+  detalhe.push(['TOTAL', '', '', '', '', '', '', '', '', '', '', reais(pixSoma(r.vendas)), '', '', '', '', reais(pixSoma(r.vendas, 'banco')), reais(pixSoma(r.vendas, 'diferenca')), '', '']);
+
+  var semVenda = [['ID Extrato', 'Conta', 'Extrato (arquivo)', 'Linha no extrato', 'Data', 'Pagador (descrição do extrato)', 'Valor banco (R$)', 'Situação']];
+  r.semVenda.forEach(function(x){ semVenda.push([x.id, x.conta + ' (' + pixNomeConta(x.conta) + ')', x.arquivo, x.linha, formatDateBR(x.data), x.pagador, reais(x.centavos), x.situacao]); });
+
+  var extratos = [['ID Extrato', 'Arquivo do extrato', 'Conta', 'Linha no arquivo', 'Data', 'Descrição (RECEBIMENTO PIX)', 'Valor (R$)', 'ID Venda conciliada', 'Situação']];
+  r.pix.forEach(function(x){ extratos.push([x.id, x.arquivo, x.conta, x.linha, x.data ? formatDateBR(x.data) : '', x.pagador, reais(x.centavos), x.venda ? x.venda.id : '', x.situacao]); });
+  extratos.push(['TOTAL', '', '', '', '', '', reais(pixSoma(r.pix)), '', '']);
+
+  var sistema = [['ID Venda', 'Loja', 'Loja no relatório (PDF)', 'Página PDF', 'Registro', 'Sit', 'Documento', 'Data', 'Hora', 'Cx/Tu', 'Vendedor', 'Valor (R$)']];
+  r.vendas.forEach(function(v){ sistema.push([v.id, storeName(v.loja), v.lojaPdf, v.pagina, v.registro, v.sit, v.documento, formatDateBR(v.data), v.hora || '', v.caixaTurno, v.vendedor, reais(v.centavos)]); });
+  sistema.push(['TOTAL', '', '', '', '', '', '', '', '', '', '', reais(pixSoma(r.vendas))]);
+
+  return [
+    { nome: 'Conciliação PIX', linhas: resumo, colunas: [34, 30, 28, 20, 14, 18, 16, 60, 16, 18, 14, 18, 14, 18] },
+    { nome: 'Venda a venda', linhas: detalhe, colunas: [9, 8, 18, 8, 10, 6, 10, 11, 7, 7, 9, 12, 10, 18, 12, 36, 12, 14, 40, 70] },
+    { nome: 'Pix sem venda', linhas: semVenda, colunas: [10, 26, 20, 10, 11, 40, 14, 22] },
+    { nome: 'Extratos PIX', linhas: extratos, colunas: [10, 20, 10, 10, 11, 40, 12, 12, 22] },
+    { nome: 'Vendas Sistema PIX', linhas: sistema, colunas: [9, 8, 18, 8, 10, 6, 10, 11, 7, 7, 9, 12] }
+  ];
+}
+
+/* =========================================================================
    UI — DROPZONE / SLOTS
    ========================================================================= */
 var dropzone = document.getElementById('dropzone');
@@ -1062,6 +1424,9 @@ function invalidateResults(){
   state.cardAudit = null;
   state.multi = null;
   state.storeKey = null;
+  state.pix = null;
+  document.getElementById('view-pix').hidden = true;
+  document.getElementById('btnExportLabel').textContent = 'Exportar divergências (.xlsx)';
   document.getElementById('resultsWrap').classList.remove('show');
   document.getElementById('btnExport').disabled = true;
 }
@@ -1095,8 +1460,12 @@ async function handleIncomingFiles(files){
       if(ext === 'pdf'){
         var type = await detectPdfType(file);
         if(type === 'caixa' || type === 'cielo' || type === 'lancamentos'){
-          if((type === 'cielo' || type === 'lancamentos') && state.files.sicredi.length > 0){
+          if((type === 'cielo' || type === 'lancamentos') && relacaoPixEnviada()){
+            showToast('A Relação de Vendas enviada é de PIX (Carteira Digital). Cielo e Lançamentos são da conciliação de cartão: use uma conciliação por vez.', true);
+          } else if((type === 'cielo' || type === 'lancamentos') && state.files.sicredi.length > 0){
             showToast('Use somente um comparativo por vez: Cielo ou Extrato PIX.', true);
+          } else if(type === 'caixa' && !(await aceitarRelacao(file))){
+            // O motivo da recusa já foi mostrado.
           } else {
             if(type === 'cielo') warnRepeatedCieloStore(file, cieloStoresFromLines(await extractPdfLines(file)));
             assignFile(type, file);
@@ -1111,7 +1480,8 @@ async function handleIncomingFiles(files){
           else assignFile('cielo', file);
         } else if(type2 === 'sicredi'){
           if(state.files.cielo.length > 0 || state.files.lancamentos.length > 0) showToast('Remova os arquivos de cartões para usar o extrato PIX.', true);
-          else assignFile('sicredi', file);
+          else if(state.files.caixa.length > 0 && !relacaoPixEnviada()) showToast('A Relação de Vendas enviada é de cartão magnético. Para o PIX, envie a Relação emitida com Forma Pagto. CARTEIRA DIGITAL.', true);
+          else if(await aceitarExtratoPix(file)) assignFile('sicredi', file);
         } else {
           showToast('Não foi possível identificar o tipo de "' + file.name + '". Verifique o layout do arquivo.', true);
         }
@@ -1162,6 +1532,8 @@ function assignFile(slot, file){
   }
   el.querySelector('.fs-status').textContent = 'Pronto para processar';
   if(slot === 'cielo') updateCieloSlotStatus();
+  if(slot === 'sicredi') updatePixSlotStatus();
+  if(slot === 'caixa' && relacaoPixEnviada()) el.querySelector('.fs-status').textContent = 'Pronto · PIX (Carteira Digital)';
   el.querySelector('.fs-icon').textContent = file.name.split('.').pop().toUpperCase();
   el.querySelector('.fs-remove').style.display = 'inline-flex';
 }
@@ -1170,7 +1542,7 @@ function clearSlot(slot){
   invalidateResults();
   state.files[slot] = [];
   var el = document.getElementById('slot-' + slot);
-  el.classList.remove('filled');
+  el.classList.remove('filled', 'partial');
   el.classList.add('empty');
   el.querySelector('.fs-name').textContent = 'Nenhum arquivo';
   el.querySelector('.fs-status').textContent = 'Aguardando envio';
@@ -1186,6 +1558,10 @@ document.querySelectorAll('.fs-remove').forEach(function(btn){
 });
 
 function updateProcessButtonState(){
+  // Extrato Sicredi ou Relação de CARTEIRA DIGITAL: conciliação PIX.
+  var modoPix = state.files.sicredi.length > 0 || relacaoPixEnviada();
+  document.querySelector('.detail-upload').hidden = modoPix;
+  if(modoPix){ updatePixProcessState(); return; }
   var hasCaixa = state.files.caixa.length > 0;
   var hasComparativo = state.files.sicredi.length > 0 || state.files.cielo.length > 0;
   var ready = hasCaixa && hasComparativo;
@@ -1210,6 +1586,230 @@ function updateProcessButtonState(){
 }
 
 /* =========================================================================
+   PIX — arquivos, processamento e resultado
+   A Relação de CARTEIRA DIGITAL e os extratos Sicredi usam as mesmas vagas do
+   Caixa e do extrato. Cada extrato é reconhecido pela conta do cabeçalho.
+   ========================================================================= */
+var relacaoPixArquivos = new WeakMap();
+var extratosPixCache = new WeakMap();
+function mesmoArquivo(a, b){ return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified; }
+function relacaoPixEnviada(){ return state.files.caixa.some(function(f){ return relacaoPixArquivos.get(f) === true; }); }
+function extratosPixEnviados(){ return state.files.sicredi.map(function(f){ return extratosPixCache.get(f); }).filter(Boolean); }
+function contasPixFaltando(){ var contas = extratosPixEnviados().map(function(e){ return e.conta; }); return PIX_CONTAS.filter(function(c){ return !contas.includes(c.conta); }); }
+function listaTexto(itens){ return itens.join(', ').replace(/, ([^,]*)$/, ' e $1'); }
+
+async function aceitarRelacao(file){
+  if(state.files.caixa.some(function(f){ return mesmoArquivo(f, file); })) return true; // assignFile avisa a repetição
+  var pix = isRelacaoPix(await extractPdfLines(file));
+  relacaoPixArquivos.set(file, pix);
+  if(pix && (state.files.cielo.length || state.files.lancamentos.length)){ showToast('Esta Relação de Vendas é de PIX (Carteira Digital), mas já há arquivos de cartão (Cielo ou Lançamentos). Use uma conciliação por vez.', true); return false; }
+  if(!pix && state.files.sicredi.length){ showToast('Esta Relação de Vendas é de cartão magnético. Com extratos PIX, envie a Relação emitida com Forma Pagto. CARTEIRA DIGITAL.', true); return false; }
+  if(state.files.caixa.some(function(f){ return relacaoPixArquivos.get(f) !== pix; })){ showToast('Já existe uma Relação de Vendas de ' + (pix ? 'cartão' : 'PIX') + '. Use uma conciliação por vez: cartão ou PIX.', true); return false; }
+  if(pix && state.files.caixa.length){ showToast('A conciliação PIX usa uma Relação de Vendas só, com todas as lojas. Remova a anterior para enviar esta.', true); return false; }
+  return true;
+}
+
+async function readExtratoPix(file){
+  if(extratosPixCache.has(file)) return extratosPixCache.get(file);
+  var wb = await readWorkbook(file);
+  var ws = wb.Sheets[wb.SheetNames[0]];
+  // A linha do Excel aparece no resultado; a matriz começa na primeira linha da planilha.
+  var primeiraLinha = ws && ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s.r + 1 : 1;
+  var matrix = ws ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true }) : [];
+  var extrato = parseExtratoPix(matrix, { arquivo: file.name, primeiraLinha: primeiraLinha });
+  extratosPixCache.set(file, extrato);
+  return extrato;
+}
+
+async function aceitarExtratoPix(file){
+  if(state.files.sicredi.some(function(f){ return mesmoArquivo(f, file); })) return true; // assignFile avisa a repetição
+  var extrato;
+  try{ extrato = await readExtratoPix(file); }
+  catch(err){ showToast(err.message, true); return false; }
+  if(!pixContaCadastrada(extrato.conta)){ showToast('O extrato "' + file.name + '" é da conta ' + extrato.conta + ', que não está no cadastro PIX. Contas cadastradas: ' + pixContasTexto() + '.', true); return false; }
+  var repetido = state.files.sicredi.find(function(f){ var e = extratosPixCache.get(f); return e && e.conta === extrato.conta; });
+  if(repetido){ showToast('Já existe o extrato da conta ' + extrato.conta + ' (' + pixNomeConta(extrato.conta) + '): "' + repetido.name + '".', true); return false; }
+  return true;
+}
+
+function updatePixSlotStatus(){
+  var el = document.getElementById('slot-sicredi');
+  if(!state.files.sicredi.length) return;
+  var contas = extratosPixEnviados().map(function(e){ return e.conta; });
+  var recebidos = PIX_CONTAS.filter(function(c){ return contas.includes(c.conta); }).map(function(c){ return pixNomeConta(c.conta); });
+  var faltando = contasPixFaltando();
+  el.querySelector('.fs-status').textContent = faltando.length
+    ? recebidos.length + ' de ' + PIX_CONTAS.length + ' · ' + recebidos.join(', ') + ' · falta ' + listaTexto(faltando.map(function(c){ return pixNomeConta(c.conta); }))
+    : 'Pronto · ' + recebidos.join(', ');
+  el.classList.toggle('partial', faltando.length > 0);
+}
+
+function updatePixProcessState(){
+  var temRelacao = relacaoPixEnviada(), faltando = contasPixFaltando();
+  var ready = temRelacao && state.files.caixa.length === 1 && !faltando.length;
+  var falta = [];
+  if(!temRelacao) falta.push('a "Relação de Vendas por Período" emitida com CARTEIRA DIGITAL');
+  faltando.forEach(function(c){ falta.push('o extrato da ' + pixNomeConta(c.conta) + ' (conta ' + c.conta + ')'); });
+  document.getElementById('btnProcess').disabled = !ready;
+  document.getElementById('processHint').textContent = ready ? 'Conciliação PIX pronta: Relação de Vendas + extratos das ' + PIX_CONTAS.length + ' contas.' : 'Conciliação PIX: falta ' + listaTexto(falta) + '.';
+  document.getElementById('slot-sicredi').hidden = false;
+  document.getElementById('slot-cielo').hidden = true;
+  document.querySelector('.file-slots').classList.add('has-comparative');
+}
+
+async function processarPix(){
+  if(!relacaoPixEnviada()) throw new Error('Envie a "Relação de Vendas por Período" emitida com Forma Pagto. CARTEIRA DIGITAL.');
+  var faltando = contasPixFaltando();
+  if(faltando.length) throw new Error('Falta o extrato da ' + listaTexto(faltando.map(function(c){ return pixNomeConta(c.conta) + ' (conta ' + c.conta + ')'; })) + '.');
+  showOverlay('Lendo a Relação de Vendas (PIX)…');
+  var relacao = parseRelacaoPix(await extractPdfLines(state.files.caixa[0]));
+  showOverlay('Lendo os extratos Sicredi…');
+  var extratos = [];
+  for(var i = 0; i < state.files.sicredi.length; i++) extratos.push(await readExtratoPix(state.files.sicredi[i]));
+  showOverlay('Conciliando os Pix…');
+  state.pix = conciliarPix(relacao, extratos);
+  state.pixFiltro = 'pending';
+  document.getElementById('pixSearch').value = '';
+  state.processedOnce = true;
+  renderPix();
+  var r = state.pix, pendencias = r.naoEncontradas.length + r.semVenda.length;
+  if(r.avisos.length) showToast('Conciliação PIX processada com avisos. Confira o quadro vermelho antes de usar o resultado.', true);
+  else showToast(pendencias ? 'Conciliação PIX processada: ' + pendencias + ' pendência(s).' : 'Conciliação PIX processada sem pendências.');
+}
+
+function pixDiferencaTexto(c){ return c === 0 ? fmtBRL(0) : (c > 0 ? '+ ' : '− ') + fmtBRL(Math.abs(c) / 100); }
+function pixStatusHtml(status){
+  var bad = [PIX_STATUS.naoEncontrado, PIX_STATUS.semVenda, 'PENDENTE'], ok = [PIX_STATUS.conciliado, '100% CONCILIADO'], off = [PIX_STATUS.foraDoPeriodo, 'SEM VENDAS PIX'];
+  var classe = bad.includes(status) ? 'bad' : ok.includes(status) ? 'ok' : off.includes(status) ? 'off' : 'warn';
+  return '<span class="pix-status ' + classe + '">' + escapeHtml(status) + '</span>';
+}
+function pixContaPendente(c){ return c.composicao.some(function(x){ return x.tipo === 'semVenda' || x.tipo === 'naoEncontradas'; }); }
+function pixQtd(n, singular, plural){ return n + ' ' + (n === 1 ? singular : plural); }
+
+function renderPix(){
+  var r = state.pix, p = r.ponte;
+  document.getElementById('resultsWrap').classList.add('show');
+  document.getElementById('storeSwitch').hidden = true;
+  document.getElementById('view-stores').hidden = true;
+  document.getElementById('storeDetail').hidden = true;
+  document.getElementById('view-pix').hidden = false;
+  document.getElementById('btnExport').disabled = false;
+  document.getElementById('btnExportLabel').textContent = 'Exportar conciliação PIX (.xlsx)';
+  document.getElementById('pixRunLabel').textContent = 'Data conciliada ' + pixPeriodoTexto(r.periodo) + ' · processado em ' + new Date().toLocaleString('pt-BR');
+
+  var nao = r.naoEncontradas.length, sem = r.semVenda.length, ressalvas = r.ressalvas.length;
+  var status = nao || sem
+    ? ['bad', 'Pendente', [nao ? pixQtd(nao, 'venda não encontrada', 'vendas não encontradas') : '', sem ? pixQtd(sem, 'Pix sem venda', 'Pix sem venda') : '', ressalvas ? pixQtd(ressalvas, 'ressalva', 'ressalvas') : ''].filter(Boolean).join(' · ')]
+    : ressalvas ? ['review', 'Conciliado c/ ressalvas', pixQtd(ressalvas, 'venda com ressalva', 'vendas com ressalva') + ': centavos ou outra conta'] : ['ok', 'Tudo conciliado', 'Todas as vendas PIX foram encontradas nos extratos'];
+  var metrics = [
+    ['Vendas PIX · sistema', fmtBRL(p.totalSistema / 100), pixQtd(r.vendas.length, 'venda', 'vendas') + ' em ' + r.porLoja.filter(function(l){ return l.qtdVendas; }).length + ' loja(s)'],
+    ['Pix nos extratos · ' + pixPeriodoTexto(r.periodo), fmtBRL(p.totalExtratos / 100), pixQtd(r.pix.length - r.foraDoPeriodo.length, 'Pix', 'Pix') + ' em ' + r.porConta.filter(function(c){ return c.enviado; }).length + ' contas · ' + r.foraDoPeriodo.length + ' de outro dia'],
+    ['Diferença Banco − Sistema', pixDiferencaTexto(p.totalExtratos - p.totalSistema), 'Explicada na ponte abaixo']
+  ];
+  document.getElementById('pixMetrics').innerHTML = metrics.map(function(x){ return '<div class="metric-card"><div class="m-label">' + escapeHtml(x[0]) + '</div><div class="m-value">' + x[1] + '</div><div class="m-sub">' + escapeHtml(x[2]) + '</div></div>'; }).join('')
+    + '<div class="metric-card status"><div class="m-label">Status geral</div><div class="m-value"><span class="status-badge ' + status[0] + '">' + status[1] + '</span></div><div class="m-sub">' + escapeHtml(status[2]) + '</div></div>';
+
+  var alertEl = document.getElementById('pixAlerts');
+  alertEl.hidden = !r.avisos.length;
+  alertEl.innerHTML = r.avisos.length ? '<span class="integrity-symbol" aria-hidden="true">!</span><div><strong>Confira antes de usar o resultado</strong><ul>' + r.avisos.map(function(a){ return '<li>' + escapeHtml(a) + '</li>'; }).join('') + '</ul></div>' : '';
+
+  document.getElementById('pixLojasBody').innerHTML = r.porLoja.map(function(l){
+    var diffClass = l.diferenca === 0 ? 'diff-zero' : l.qtdNaoEncontradas ? 'diff-neg' : 'pix-diff-warn';
+    var nota = l.qtdRessalvas ? '<small>' + pixQtd(l.qtdRessalvas, 'venda com ressalva', 'vendas com ressalva') + '</small>' : '';
+    return '<tr class="' + (l.qtdNaoEncontradas ? 'pix-row-bad' : '') + '"><td><strong>' + escapeHtml(l.nome) + '</strong><small>' + escapeHtml(l.nomePdf || storeCodeNote(l.loja) || '') + '</small></td>'
+      + '<td class="mono">' + escapeHtml(l.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(l.conta)) + (l.arquivo ? ' · ' + escapeHtml(l.arquivo) : '') + '</small></td>'
+      + '<td class="num">' + fmtBRL(l.totalSistema / 100) + '<small>' + pixQtd(l.qtdVendas, 'venda', 'vendas') + '</small></td>'
+      + '<td class="num">' + fmtBRL(l.totalBanco / 100) + '<small>' + pixQtd(l.qtdConciliadas, 'conciliada', 'conciliadas') + '</small></td>'
+      + '<td class="num ' + diffClass + '">' + pixDiferencaTexto(l.diferenca) + '</td>'
+      + '<td class="num">' + (l.qtdNaoEncontradas ? '<span class="diff-neg">' + fmtBRL(l.valorNaoEncontrado / 100) + '</span><small>' + pixQtd(l.qtdNaoEncontradas, 'venda', 'vendas') + '</small>' : '—') + '</td>'
+      + '<td>' + pixStatusHtml(l.situacao) + nota + '</td></tr>';
+  }).join('');
+  document.getElementById('pixLojasFoot').innerHTML = '<tr><td>Total</td><td></td><td class="num">' + fmtBRL(pixSoma(r.porLoja, 'totalSistema') / 100) + '</td><td class="num">' + fmtBRL(pixSoma(r.porLoja, 'totalBanco') / 100) + '</td><td class="num">' + pixDiferencaTexto(pixSoma(r.porLoja, 'diferenca')) + '</td><td class="num">' + (nao ? fmtBRL(pixSoma(r.porLoja, 'valorNaoEncontrado') / 100) : '—') + '</td><td></td></tr>';
+
+  document.getElementById('pixContasBody').innerHTML = r.porConta.map(function(c){
+    var pendente = pixContaPendente(c);
+    var diffClass = c.diferenca === 0 ? 'diff-zero' : pendente ? 'diff-neg' : 'pix-diff-warn';
+    var composicao = c.composicao.length
+      ? '<ul class="pix-composicao">' + c.composicao.map(function(x){ var ruim = x.tipo === 'semVenda' || x.tipo === 'naoEncontradas'; return '<li class="' + (ruim ? 'bad' : 'warn') + '"><b>' + pixDiferencaTexto(x.valor) + '</b> ' + escapeHtml(x.texto) + '</li>'; }).join('') + '</ul>'
+      : '<span class="muted">Sem diferença</span>';
+    return '<tr class="' + (pendente ? 'pix-row-bad' : '') + '"><td class="mono"><strong>' + escapeHtml(c.conta) + '</strong><small>' + escapeHtml(c.arquivo || 'extrato não enviado') + '</small></td>'
+      + '<td>' + escapeHtml(c.nome) + '</td>'
+      + '<td class="num">' + fmtBRL(c.totalPeriodo / 100) + '<small>' + pixQtd(c.qtdPeriodo, 'Pix', 'Pix') + '</small></td>'
+      + '<td class="num">' + fmtBRL(c.totalSistema / 100) + '<small>' + pixQtd(c.qtdVendasSistema, 'venda', 'vendas') + '</small></td>'
+      + '<td class="num ' + diffClass + '"><strong>' + pixDiferencaTexto(c.diferenca) + '</strong></td>'
+      + '<td>' + composicao + '</td>'
+      + '<td class="num">' + (c.qtdFora ? fmtBRL(c.valorFora / 100) + '<small>' + pixQtd(c.qtdFora, 'Pix', 'Pix') + ' de outro dia</small>' : '—') + '</td></tr>';
+  }).join('');
+  document.getElementById('pixContasFoot').innerHTML = '<tr><td>Total</td><td></td><td class="num">' + fmtBRL(pixSoma(r.porConta, 'totalPeriodo') / 100) + '</td><td class="num">' + fmtBRL(pixSoma(r.porConta, 'totalSistema') / 100) + '</td><td class="num">' + pixDiferencaTexto(pixSoma(r.porConta, 'diferenca')) + '</td><td></td><td class="num">' + fmtBRL(pixSoma(r.porConta, 'valorFora') / 100) + '</td></tr>';
+
+  var ponte = [
+    ['Total vendas PIX no sistema', fmtBRL(p.totalSistema / 100), ''],
+    ['(+) Diferenças de centavos nas vendas conciliadas', pixDiferencaTexto(p.centavos), p.centavos ? 'pix-diff-warn' : ''],
+    ['(+) Pix no banco sem venda no sistema', pixDiferencaTexto(p.semVenda), p.semVenda ? 'diff-neg' : ''],
+    ['(−) Vendas não encontradas no extrato', pixDiferencaTexto(-p.naoEncontradas), p.naoEncontradas ? 'diff-neg' : ''],
+    ['(=) Total Pix esperado nos extratos', fmtBRL(p.esperado / 100), 'pix-strong'],
+    ['Total Pix nos extratos (período)', fmtBRL(p.totalExtratos / 100), 'pix-strong'],
+    ['Checagem (deve ser 0)', pixDiferencaTexto(p.checagem), p.checagem ? 'diff-neg' : 'pix-check-ok']
+  ];
+  document.getElementById('pixPonteBody').innerHTML = ponte.map(function(x){ return '<tr><td>' + escapeHtml(x[0]) + '</td><td class="num ' + x[2] + '">' + x[1] + '</td></tr>'; }).join('');
+
+  renderPixVendas();
+
+  document.getElementById('pixSemVendaCount').textContent = sem ? pixQtd(sem, 'Pix', 'Pix') + ' · ' + fmtBRL(p.semVenda / 100) : '';
+  document.getElementById('pixSemVendaEmpty').hidden = sem > 0;
+  document.getElementById('pixSemVendaWrap').hidden = !sem;
+  document.getElementById('pixSemVendaBody').innerHTML = r.semVenda.map(function(x){
+    return '<tr class="pix-row-bad"><td class="mono">' + escapeHtml(x.id) + '</td><td class="mono">' + escapeHtml(x.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(x.conta)) + '</small></td><td>' + escapeHtml(x.arquivo) + '<small>linha ' + x.linha + '</small></td><td class="mono">' + formatDateBR(x.data) + '</td><td>' + escapeHtml(x.pagador) + '</td><td class="num diff-neg">' + fmtBRL(x.centavos / 100) + '</td><td>' + pixStatusHtml(x.situacao) + '</td></tr>';
+  }).join('');
+
+  document.getElementById('pixForaCount').textContent = r.foraDoPeriodo.length ? pixQtd(r.foraDoPeriodo.length, 'Pix', 'Pix') + ' · ' + fmtBRL(pixSoma(r.foraDoPeriodo) / 100) : 'nenhum';
+  document.getElementById('pixForaBody').innerHTML = r.foraDoPeriodo.map(function(x){
+    return '<tr><td class="mono">' + escapeHtml(x.id) + '</td><td class="mono">' + escapeHtml(x.conta) + '<small>conta da ' + escapeHtml(pixNomeConta(x.conta)) + '</small></td><td>' + escapeHtml(x.arquivo) + '<small>linha ' + x.linha + '</small></td><td class="mono">' + (x.data ? formatDateBR(x.data) : '—') + '</td><td>' + escapeHtml(x.pagador) + '</td><td class="num">' + fmtBRL(x.centavos / 100) + '</td></tr>';
+  }).join('');
+}
+
+function renderPixVendas(){
+  if(!state.pix) return;
+  var query = normalizeText(document.getElementById('pixSearch').value);
+  var vendas = state.pix.vendas.filter(function(v){
+    if(state.pixFiltro === 'pending' && v.status === PIX_STATUS.conciliado) return false;
+    if(!query) return true;
+    return normalizeText([v.id, storeName(v.loja), v.registro, v.documento, v.sit, pixReais(v.centavos), v.status, v.observacao, v.contaRecebida].concat(v.pix.map(function(p){ return p.pagador + ' ' + p.linha; })).join(' ')).includes(query);
+  });
+  document.querySelectorAll('[data-pix-filter]').forEach(function(b){ var active = b.dataset.pixFilter === state.pixFiltro; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
+  document.getElementById('pixVendasCount').textContent = vendas.length + ' de ' + state.pix.vendas.length + ' vendas';
+  document.getElementById('pixVendasEmpty').hidden = vendas.length > 0;
+  document.getElementById('pixVendasBody').innerHTML = vendas.map(function(v){
+    var bad = v.status === PIX_STATUS.naoEncontrado, warn = !bad && v.status !== PIX_STATUS.conciliado;
+    var outra = v.pix.length && v.contaRecebida !== v.conta ? '<span class="store-tag">conta da ' + escapeHtml(pixNomeConta(v.contaRecebida)) + '</span>' : '';
+    var banco = v.pix.length
+      ? '<span class="mono">' + escapeHtml(v.contaRecebida) + '</span>' + outra + '<small>' + escapeHtml(v.pix[0].arquivo) + ' · linha ' + v.pix.map(function(p){ return p.linha; }).join(' + ') + '</small><small>' + escapeHtml(v.pix.map(function(p){ return p.pagador; }).join(' | ')) + '</small>'
+      : '<span class="diff-neg">Não encontrado</span><small>conta ' + escapeHtml(v.conta) + (v.delivery && v.conta !== PIX_CONTA_DELIVERY ? ' e ' + PIX_CONTA_DELIVERY + ' (delivery)' : '') + '</small>';
+    return '<tr class="' + (bad ? 'pix-row-bad' : warn ? 'pix-row-warn' : '') + '">'
+      + '<td><strong>' + escapeHtml(v.id) + '</strong><small>' + escapeHtml(storeName(v.loja)) + ' · Reg. ' + escapeHtml(v.registro) + '</small></td>'
+      + '<td class="mono">' + formatDateBR(v.data) + ' · ' + escapeHtml(v.hora || '—') + '<small>' + escapeHtml(v.sit) + (v.delivery ? ' (delivery)' : '') + ' · Doc. ' + escapeHtml(v.documento) + ' · Cx/Tu ' + escapeHtml(v.caixaTurno) + ' · Vend. ' + escapeHtml(v.vendedor) + ' · Pág. ' + v.pagina + '</small></td>'
+      + '<td class="num">' + fmtBRL(v.centavos / 100) + '</td>'
+      + '<td>' + banco + '</td>'
+      + '<td class="num">' + (v.pix.length ? fmtBRL(v.banco / 100) : '—') + '</td>'
+      + '<td class="num ' + (v.diferenca === 0 ? 'diff-zero' : bad ? 'diff-neg' : 'pix-diff-warn') + '">' + pixDiferencaTexto(v.diferenca) + '</td>'
+      + '<td>' + pixStatusHtml(v.status) + (v.observacao ? '<small class="pix-obs">' + escapeHtml(v.observacao) + '</small>' : '') + '</td></tr>';
+  }).join('');
+}
+document.querySelectorAll('[data-pix-filter]').forEach(function(b){ b.addEventListener('click', function(){ state.pixFiltro = b.dataset.pixFilter; renderPixVendas(); }); });
+document.getElementById('pixSearch').addEventListener('input', renderPixVendas);
+
+function exportarPix(){
+  var wb = XLSX.utils.book_new();
+  planilhasPix(state.pix).forEach(function(aba){
+    var ws = XLSX.utils.aoa_to_sheet(aba.linhas);
+    ws['!cols'] = aba.colunas.map(function(w){ return { wch: w }; });
+    XLSX.utils.book_append_sheet(wb, ws, aba.nome);
+  });
+  XLSX.writeFile(wb, 'conciliacao_pix_' + state.pix.periodo.inicio + '.xlsx');
+  showToast('Conciliação PIX exportada.');
+}
+
+/* =========================================================================
    PROCESSAMENTO PRINCIPAL
    ========================================================================= */
 document.getElementById('btnProcess').addEventListener('click', async function(){
@@ -1217,6 +1817,7 @@ document.getElementById('btnProcess').addEventListener('click', async function()
   try{
     var caixaTx = [], sicrediTx = [], cieloTx = [], launchTx = [];
     invalidateResults();
+    if(state.files.sicredi.length > 0 || relacaoPixEnviada()){ await processarPix(); return; }
 
     if(state.files.caixa.length === 0 || (state.files.sicredi.length === 0 && state.files.cielo.length === 0)){
       throw new Error('Envie relatórios do Caixa e arquivos de um comparativo.');
@@ -1770,6 +2371,7 @@ function divergenceTypeLabel(tipo){
 }
 
 document.getElementById('btnExport').addEventListener('click', function(){
+  if(state.pix){ exportarPix(); return; }
   var multi = state.multi && state.multi.multi;
   var sources = multi ? state.multi.views.map(function(v){ return { divergences: v.divergences, summary: v.summary, loja: v.loja }; }) : [{ divergences: state.divergences, summary: state.summary, loja: '' }];
   if(!sources.some(function(s){ return s.divergences.length; })){ showToast('Não há divergências para exportar.', true); return; }

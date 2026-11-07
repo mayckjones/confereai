@@ -12,9 +12,9 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 16V4M12 4L7 9M12 4l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <h3>Arraste os arquivos aqui</h3>
-    <p>ou <span class="browse">clique para selecionar</span>. Envie a Relação de Vendas + Cielo (ou extrato PIX).</p>
-    <p class="dz-extra">Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Identificamos cada relatório automaticamente.</p>
-    <p class="dz-extra">Várias lojas de uma vez: Relação e Lançamentos com todas as lojas + a Cielo de cada loja (1, 3, 4 e 5). A loja de cada Cielo é reconhecida pelo estabelecimento.</p>
+    <p>ou <span class="browse">clique para selecionar</span>. Identificamos cada relatório automaticamente: cartão ou PIX.</p>
+    <p class="dz-extra"><strong>Cartão:</strong> Relação de Vendas + Cielo. Quer conferir também os cartões? Acrescente os Lançamentos de Cartão Magnético. Várias lojas de uma vez: Relação e Lançamentos com todas as lojas + a Cielo de cada loja (1, 3, 4 e 5).</p>
+    <p class="dz-extra"><strong>PIX:</strong> Relação de Vendas emitida com Forma Pagto. CARTEIRA DIGITAL + os extratos Sicredi (.xls) das Lojas 1, 2, 3 e 5. A Loja 4 recebe na conta da Loja 2. Cada extrato é reconhecido pela conta.</p>
     <input id="fileInput" type="file" accept=".pdf,.xls,.xlsx" multiple hidden>
   </div>
 
@@ -31,7 +31,7 @@
     <div class="file-slot sicredi empty" id="slot-sicredi">
       <div class="fs-icon">XLS</div>
       <div class="fs-body">
-        <div class="fs-label">Extrato Sicredi (PIX)</div>
+        <div class="fs-label">Extratos Sicredi (PIX)</div>
         <div class="fs-name">Nenhum arquivo</div>
         <div class="fs-status">Aguardando envio</div>
       </div>
@@ -65,7 +65,7 @@
     </button>
     <button class="btn btn-ghost" id="btnExport" disabled>
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      Exportar divergências (.xlsx)
+      <span id="btnExportLabel">Exportar divergências (.xlsx)</span>
     </button>
     <button class="btn btn-danger-ghost" id="btnReset">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 1 0 3-6.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 4v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -76,6 +76,88 @@
 
   <!-- RESULTS -->
   <div class="results-wrap" id="resultsWrap">
+
+    <!-- RESULTADO PIX (Relação CARTEIRA DIGITAL × extratos Sicredi) -->
+    <div id="view-pix" class="pix-view" hidden>
+      <div class="result-context"><span class="badge b-blue">Conciliação PIX</span><span>Relação de Vendas (Cart. Dig) × extratos Sicredi · só lançamentos RECEBIMENTO PIX</span></div>
+      <div class="section-head">
+        <h2>2. Visão geral PIX</h2>
+        <span class="sub" id="pixRunLabel"></span>
+      </div>
+      <div class="metrics metrics-4" id="pixMetrics"></div>
+      <div class="pix-alerts" id="pixAlerts" role="alert" hidden></div>
+
+      <div class="section-head">
+        <h2>3. Resumo por loja</h2>
+        <span class="sub">Vendas de cada loja × Pix encontrados para elas, em qualquer conta</span>
+      </div>
+      <div class="panel">
+        <div class="table-scroll">
+          <table class="pix-table">
+            <thead><tr><th>Loja</th><th>Conta onde cai o Pix</th><th class="num">Sistema</th><th class="num">Banco conciliado</th><th class="num">Diferença</th><th class="num">Não encontrado</th><th>Situação</th></tr></thead>
+            <tbody id="pixLojasBody"></tbody>
+            <tfoot id="pixLojasFoot"></tfoot>
+          </table>
+        </div>
+        <div class="source-note">Diferença = banco conciliado − sistema. A Loja 4 não tem conta própria e recebe na conta da Loja 2. Venda delivery (Dom) pode cair na conta da Loja 5.</div>
+      </div>
+
+      <div class="section-head">
+        <h2>4. Resumo por conta bancária</h2>
+        <span class="sub">Pix do dia em cada conta × vendas das lojas que recebem nela</span>
+      </div>
+      <div class="panel">
+        <div class="table-scroll">
+          <table class="pix-table">
+            <thead><tr><th>Conta</th><th>Lojas</th><th class="num">Pix no extrato</th><th class="num">Vendas do sistema</th><th class="num">Diferença Banco − Sistema</th><th>De onde vem a diferença</th><th class="num">Fora do período</th></tr></thead>
+            <tbody id="pixContasBody"></tbody>
+            <tfoot id="pixContasFoot"></tfoot>
+          </table>
+        </div>
+        <div class="source-note">Os Pix de outro dia (o extrato traz o dia seguinte) ficam como "fora do período" e não contam como diferença.</div>
+      </div>
+
+      <div class="section-head">
+        <h2>5. Ponte Sistema × Banco</h2>
+        <span class="sub">Como o total do sistema chega ao total dos extratos</span>
+      </div>
+      <div class="panel">
+        <table class="pix-bridge"><tbody id="pixPonteBody"></tbody></table>
+      </div>
+
+      <div class="section-head">
+        <h2>6. Venda a venda</h2>
+        <span class="sub" id="pixVendasCount"></span>
+      </div>
+      <div class="panel detail-panel">
+        <div class="detail-toolbar">
+          <div class="detail-filters" role="group" aria-label="Filtrar vendas PIX"><button class="active" data-pix-filter="pending" aria-pressed="true">Pendências e ressalvas</button><button data-pix-filter="all" aria-pressed="false">Todas</button></div>
+          <label class="detail-search"><span>Buscar</span><input id="pixSearch" type="search" placeholder="Registro, valor, pagador…"></label>
+        </div>
+        <div class="legend pix-legend">
+          <span><span class="sw" style="background:var(--red)"></span> Pendência: não encontrado ou sem venda</span>
+          <span><span class="sw" style="background:var(--amber)"></span> Ressalva: centavos ou outra conta</span>
+          <span><span class="sw" style="background:var(--green)"></span> Conciliado</span>
+        </div>
+        <div class="table-scroll"><table class="pix-sales-table"><thead><tr><th>Venda</th><th>Data · detalhes</th><th class="num">Sistema</th><th>Pix no extrato</th><th class="num">Banco</th><th class="num">Diferença</th><th>Status</th></tr></thead><tbody id="pixVendasBody"></tbody></table></div>
+        <div class="empty-state ok" id="pixVendasEmpty" hidden><h4>Nenhuma venda neste filtro</h4><p>As vendas deste filtro foram conciliadas sem ressalvas. Veja "Todas" para conferir cada uma.</p></div>
+      </div>
+
+      <div class="section-head">
+        <h2>7. Pix no extrato sem venda no sistema</h2>
+        <span class="sub" id="pixSemVendaCount"></span>
+      </div>
+      <div class="panel">
+        <div class="table-scroll" id="pixSemVendaWrap"><table class="pix-table"><thead><tr><th>ID</th><th>Conta</th><th>Extrato</th><th>Data</th><th>Pagador</th><th class="num">Valor</th><th>Situação</th></tr></thead><tbody id="pixSemVendaBody"></tbody></table></div>
+        <div class="empty-state ok" id="pixSemVendaEmpty" hidden><h4>Nenhum Pix sem venda</h4><p>Todos os Pix do período nos extratos têm venda correspondente no sistema.</p></div>
+      </div>
+
+      <details class="detail-disclosure">
+        <summary>Pix fora do período <span id="pixForaCount"></span></summary>
+        <div class="table-scroll"><table class="pix-table"><thead><tr><th>ID</th><th>Conta</th><th>Extrato</th><th>Data</th><th>Pagador</th><th class="num">Valor</th></tr></thead><tbody id="pixForaBody"></tbody></table></div>
+        <p class="detail-footnote">São de outra data (normalmente o dia seguinte, que o extrato também traz). Não entram na conciliação deste dia.</p>
+      </details>
+    </div>
 
     <div class="store-switch" id="storeSwitch" role="group" aria-label="Escolher loja" hidden></div>
 
