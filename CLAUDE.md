@@ -12,7 +12,7 @@ Rode os testes depois de qualquer alteração em `ferramentas/` ou `js/`. Se alg
 
 O teste da conciliação PIX (`tests/conciliacao-pix.test.cjs`) também lê os arquivos reais de `exemplos/pix-dia-05/` e confere o resultado com o gabarito. Essa pasta tem dados de clientes e fica fora do Git (`.gitignore`); sem ela, esses testes aparecem como pulados (skipped).
 
-Se mudar as colunas, exemplos ou instruções da planilha de etiquetas (`TEMPLATE_*` em `ferramentas/precificacao/precificacao.js`), gere de novo a planilha modelo com `node scripts/gerar-modelo-etiquetas.cjs`.
+A precificação compara as planilhas de Produtos do Infarma (uma por loja) com a base do dia anterior (`BASE_PRECOS_AAAA-MM-DD.csv`), pelo código interno do produto. As regras ficam antes do marcador `/* ======================== INTERFACE` em `ferramentas/precificacao/precificacao.js` e são testadas em `tests/precificacao.test.cjs`.
 
 ## Título e descrição do commit ao final de toda alteração
 

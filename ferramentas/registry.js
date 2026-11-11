@@ -36,7 +36,7 @@ const TOOLS_REGISTRY = [
   {
     id: 'precificacao',
     name: 'Precificação',
-    description: 'Gere etiquetas de preço em PDF, prontas para a impressora de 80 mm, a partir de uma planilha.',
+    description: 'Compare as planilhas de produtos das lojas com a base do dia anterior e imprima as etiquetas De/Por do que mudou de preço.',
     icon: `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
       <line x1="7" y1="7" x2="7.01" y2="7"/>

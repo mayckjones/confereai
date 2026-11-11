@@ -1,660 +1,536 @@
 /* =========================================================================
-   ConfereAI — Ferramenta: Precificação (etiquetas de preço 80 mm)
-   Lê a planilha de produtos, permite revisar e gera o PDF no modelo oficial
-   ("Etiqueta OFICIAL.pdf"): folha de 80 × 297 mm com até 6 etiquetas.
+   ConfereAI — Ferramenta: Precificação (etiquetas De/Por)
+   Compara as planilhas de Produtos do Infarma (uma por loja) com a base de
+   preços do dia anterior, separa o que baixou, subiu ou é novo em cada loja
+   e monta as etiquetas prontas para imprimir (A4 ou térmica 80 mm).
+   A comparação é feita pelo código interno do produto, que não muda.
    Registrada como window.__tool_init_precificacao — chamada pelo router.
    ========================================================================= */
 
 window.__tool_init_precificacao = function(){
 
 /* =========================================================================
-   MODELO OFICIAL
-   Medidas tiradas do PDF oficial, em mm. Nos textos, "y" é a distância do
-   topo da caixa até a linha de base. O PDF usa pontos (1 mm = 72/25,4 pt)
-   com origem no canto inferior esquerdo.
+   REGRAS (sem acesso à tela; testadas em tests/precificacao.test.cjs)
    ========================================================================= */
-var MM = 72 / 25.4;
-var LAYOUT = {
-  larguraFolha: 80, alturaFolha: 297, porFolha: 6,
-  margem: 6,            // acima da primeira e abaixo da última etiqueta
-  passo: 49,            // do topo de uma etiqueta ao topo da seguinte
-  caixa: { x: 5, largura: 70, altura: 40, cinza: 0.733333, espessura: 0.5 },
-  textoX: 9,
-  larguraUtil: 62,      // da margem do texto até 4 mm antes da borda direita
-  larguraAteLogo: 40.5, // linhas que ficam à esquerda do logo
-  larguraPreco: 48,     // preço grande: para antes da ponta do coração (só R$ 1.000+ diminui)
-  nome: { y: 5.5, tamanho: 7.5, minimo: 5.5 },
-  codigo: { y: 9.5, tamanho: 7, minimo: 5.5 },
-  barras: { y: 13, tamanho: 7, minimo: 5.5 },
-  de: { y: 19, tamanho: 9, precoTamanho: 11, precoMinimo: 8, risco: 0.335, folga: 0.5, espessura: 0.9 },
-  por: { y: 24, tamanho: 9 },
-  preco: { y: 35, tamanho: 28, minimo: 14 },
-  logo: { x: 50.5, topo: 9.8743, largura: 21 },
-  corte: { y: 44.5, x1: 2, x2: 78, cinza: 0.6, traco: 2, espessura: 0.5 }
-};
+var LOJA_NOMES = { 1: 'LOJA 1 JIE', 2: 'LOJA 2 MEG 1', 3: 'LOJA 3 L E', 6: 'LOJA 6 MEG 5', 7: 'LOJA 7 MEG 4' };
+var BASE_COLUNAS = ['loja', 'codigo', 'ean', 'descricao', 'classificacao', 'estoque', 'venda', 'data_ref'];
+var TIPOS = { down: ['Baixou', 'p-down'], up: ['Subiu', 'p-up'], new: ['Novo', 'p-new'], eq: ['Igual', 'p-eq'] };
 
-var TEMPLATE_HEADERS = ['DESCRIÇÃO', 'CÓDIGO', 'CÓDIGO DE BARRAS', 'PREÇO DE', 'PREÇO POR', 'QUANTIDADE'];
-var TEMPLATE_EXAMPLES = [
-  ['FRALDA INFANTIL G C/30', '42118', '7896100542037', 59.9, 47.9, 1],
-  ['CREME DENTAL 90G C/3 UN', '37264', '7891509315770', 15.99, 11.99, 1],
-  ['DIPIRONA 500MG C/10 COMP', '10432', '7891058112349', 8.99, 5.99, 1],
-  ['PROTETOR SOLAR FPS50 120ML', '31877', '7896053208110', 69.9, 54.9, 1],
-  ['SHAMPOO SOS CACHOS KIDS 300ML', '28540', '7896224022156', 24.99, 19.99, 1],
-  ['VITAMINA C 1G C/10 EFERV', '15209', '7896367100421', 19.9, 14.9, 1]
-];
-var TEMPLATE_INSTRUCTIONS = [
-  'COMO PREENCHER A PLANILHA DE ETIQUETAS',
-  '',
-  'Use a aba "Etiquetas". Uma linha por produto. Não mude os nomes das colunas.',
-  '',
-  'DESCRIÇÃO: nome do produto como deve sair na etiqueta. Sai em letras maiúsculas. Obrigatório.',
-  'CÓDIGO: código interno do produto no sistema.',
-  'CÓDIGO DE BARRAS: EAN do produto (normalmente 13 dígitos).',
-  'PREÇO DE: preço antes da promoção. Deixe vazio se não houver promoção: a etiqueta sai só com o preço.',
-  'PREÇO POR: preço que o cliente paga. Obrigatório.',
-  'QUANTIDADE: quantas etiquetas imprimir desse produto. Vazio = 1. Zero = não imprime.',
-  '',
-  'Cada folha tem 6 etiquetas (80 × 297 mm). A última folha sai só com as etiquetas necessárias.',
-  'Apague as linhas de exemplo antes de preencher os seus produtos.'
-];
+function chave(loja, codigo){ return loja + '|' + codigo; }
+function nomeLoja(loja){ return LOJA_NOMES[loja] || ('LOJA ' + loja); }
 
-/* ---------- Larguras da Helvetica (AFM, 1/1000 do tamanho), ASCII 32–126 ---------- */
-var HELVETICA = {
-  normal: [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584],
-  negrito: [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584]
-};
-var EXTRA_WIDTHS = { ' ': [278, 278], 'ª': [370, 370], 'º': [365, 365], '°': [400, 400], '´': [333, 333], '×': [584, 584], '–': [556, 556], '—': [1000, 1000], '•': [350, 350], '…': [1000, 1000], '€': [556, 556] };
-// Caracteres que a WinAnsiEncoding coloca entre 0x80 e 0x9F.
-var WIN_ANSI_EXTRA = { '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87, 'ˆ': 0x88, '‰': 0x89, 'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '˜': 0x98, '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f };
-
-/* =========================================================================
-   TEXTO, VALORES E PLANILHA
-   ========================================================================= */
-function cleanText(value){
-  return String(value == null ? '' : value).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+// Número em qualquer formato que o Infarma ou o Excel entregam: 22.99, 7,49, 1.299,90 ou número.
+function brNum(valor){
+  if(typeof valor === 'number') return valor;
+  var s = String(valor == null ? '' : valor).trim();
+  if(/^-?\d+(\.\d+)?$/.test(s)) return parseFloat(s);
+  if(/^-?[\d.]*\d,\d+$/.test(s)) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  return NaN;
 }
 
-function encodeChar(ch){
-  var code = ch.charCodeAt(0);
-  if(code >= 32 && code <= 126) return code;
-  if(code >= 0xa0 && code <= 0xff) return code;
-  return WIN_ANSI_EXTRA[ch] || null;
+function dataHoje(agora){
+  var d = agora || new Date();
+  return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+}
+function dataIso(br){
+  var m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(br || '');
+  return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
+}
+function precoCsv(v){ return v == null ? '' : v.toFixed(2).replace('.', ','); }
+function semPontoVirgula(s){ return String(s || '').replace(/;/g, ','); }
+
+// Dígito verificador de EAN-8 e EAN-13.
+function eanValido(c){
+  if(!/^\d{8}$|^\d{13}$/.test(c)) return false;
+  var d = c.split('').map(Number), chk = d.pop(), s = 0;
+  d.reverse().forEach(function(n, i){ s += n * (i % 2 === 0 ? 3 : 1); });
+  return (10 - s % 10) % 10 === chk;
 }
 
-function hasUnsupported(text){
-  return Array.from(String(text || '')).some(function(ch){ return encodeChar(ch) === null; });
+// Código que vai para o código de barras: tira o zero extra de EAN de 14 dígitos; ignora código interno preenchido com zeros.
+function codigoBarras(ean){
+  var e = String(ean || '').trim();
+  if(e.length < 6 || /^0{4,}/.test(e)) return '';
+  return e.replace(/^0(?=\d{13}$)/, '');
 }
 
-function charWidth(ch, bold){
-  var table = HELVETICA[bold ? 'negrito' : 'normal'], code = ch.charCodeAt(0);
-  if(code >= 32 && code <= 126) return table[code - 32];
-  if(EXTRA_WIDTHS[ch]) return EXTRA_WIDTHS[ch][bold ? 1 : 0];
-  var base = ch.normalize('NFD').charAt(0), baseCode = base.charCodeAt(0);
-  if(base !== ch && baseCode >= 32 && baseCode <= 126) return table[baseCode - 32];
-  return 556;
+// Nome que sai na etiqueta: sem o "*" do início e sem o "( P )" do fim.
+function nomeEtiqueta(desc){ return String(desc || '').replace(/^\*+/, '').replace(/\(\s*P\s*\)\s*$/, '').trim(); }
+
+/* ---------- Base (CSV gerado por esta ferramenta) ---------- */
+function lerBaseCsv(texto){
+  var linhas = String(texto).replace(/^﻿/, '').split(/\r?\n/);
+  var cab = linhas[0].split(';').map(function(h){ return h.trim().toLowerCase(); });
+  function ix(n){ return cab.indexOf(n); }
+  if(ix('ean') < 0 || ix('codigo') < 0 || ix('venda') < 0 || ix('loja') < 0){
+    throw new Error('este não é um arquivo de base desta ferramenta (faltam as colunas loja, codigo, ean e venda).');
+  }
+  var recs = [], data = '';
+  for(var i = 1; i < linhas.length; i++){
+    if(!linhas[i].trim()) continue;
+    var c = linhas[i].split(';'), v = brNum(c[ix('venda')]);
+    if(isNaN(v)) continue;
+    if(!data && ix('data_ref') >= 0) data = c[ix('data_ref')] || '';
+    recs.push({
+      loja: Number(c[ix('loja')]), codigo: String(c[ix('codigo')]).trim(), ean: String(c[ix('ean')] || '').trim(),
+      descricao: ix('descricao') >= 0 ? c[ix('descricao')] || '' : '',
+      classificacao: ix('classificacao') >= 0 ? c[ix('classificacao')] || '' : '',
+      estoque: ix('estoque') >= 0 ? parseInt(c[ix('estoque')], 10) || 0 : 0, venda: v
+    });
+  }
+  return { recs: recs, data: data };
 }
 
-// Largura em pontos, como o leitor de PDF vai desenhar.
-function textWidth(text, bold, size){
-  return Array.from(String(text)).reduce(function(sum, ch){ return sum + charWidth(ch, bold); }, 0) * size / 1000;
+function paraMapa(recs){ var m = new Map(); recs.forEach(function(r){ m.set(chave(r.loja, r.codigo), r); }); return m; }
+function lojasDaBase(mapa){
+  var s = new Set(); mapa.forEach(function(r){ s.add(r.loja); });
+  return Array.from(s).sort(function(a, b){ return a - b; });
 }
 
-// Reduz a letra até o mínimo; se ainda não couber, corta com reticências.
-function fitText(text, bold, size, minSize, maxWidth){
-  var s = size;
-  while(s > minSize && textWidth(text, bold, s) > maxWidth) s = Math.max(minSize, Math.round((s - 0.25) * 100) / 100);
-  if(textWidth(text, bold, s) <= maxWidth) return { texto: text, tamanho: s, reduzido: s < size, cortado: false };
-  var chars = Array.from(text);
-  while(chars.length && textWidth(chars.join('').trim() + '…', bold, s) > maxWidth) chars.pop();
-  return { texto: chars.join('').trim() + '…', tamanho: s, reduzido: true, cortado: true };
-}
-
-function parsePrice(raw){
-  if(raw === null || raw === undefined || raw === '') return null;
-  if(typeof raw === 'number') return Number.isFinite(raw) ? Math.round(raw * 100) / 100 : null;
-  var s = String(raw).replace(/R\$/gi, '').replace(/\s/g, '');
-  if(!s) return null;
-  if(/,\d{1,2}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');   // 1.299,90
-  else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');      // 1.299
-  else s = s.replace(/,/g, '');                                         // 47.90 ou 1,299.90
-  if(!/^-?\d+(\.\d+)?$/.test(s)) return null;
-  return Math.round(Number(s) * 100) / 100;
-}
-
-function formatPrice(value){
-  var cents = Math.abs(Math.round(value * 100));
-  var inteiro = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return 'R$' + inteiro + ',' + String(cents % 100).padStart(2, '0');
-}
-
-function formatDecimal(value){ return formatPrice(value).slice(2); }
-
-// Dígito verificador de EAN-8, UPC-12, EAN-13 e GTIN-14.
-function gtinValido(code){
-  if(!/^\d+$/.test(code) || [8, 12, 13, 14].indexOf(code.length) < 0) return false;
-  var digits = code.split('').map(Number), check = digits.pop(), sum = 0;
-  digits.reverse().forEach(function(d, i){ sum += d * (i % 2 === 0 ? 3 : 1); });
-  return (10 - sum % 10) % 10 === check;
-}
-
-function normalizeHeader(value){
-  return String(value == null ? '' : value).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
-    .replace(/\(R\$\)|R\$/g, ' ').replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function columnKind(header){
-  var h = normalizeHeader(header);
-  if(!h) return null;
-  if(/\bBARRAS?\b|\bEAN\b|\bGTIN\b|^C ?BAR$/.test(h)) return 'ean';
-  if(/^(QUANTIDADE|QTD|QTDE|QUANT)\b|\bETIQUETAS\b|\bCOPIAS\b/.test(h)) return 'qtd';
-  if(/^(PRECO )?DE$|PRECO (ANTIGO|NORMAL|ANTERIOR|CHEIO)/.test(h)) return 'de';
-  if(/^(PRECO )?POR$|^PRECO$|PRECO (PROMO|PROMOCIONAL|ATUAL|FINAL|DE VENDA|VENDA)|^VALOR$/.test(h)) return 'por';
-  if(/^COD(IGO)?\b|^REFERENCIA$/.test(h)) return 'codigo';
-  if(/DESCRI|^PRODUTO$|^NOME\b/.test(h)) return 'descricao';
-  return null;
-}
-
-function mapColumns(row){
-  var map = {};
-  (row || []).forEach(function(cell, index){
-    var kind = columnKind(cell);
-    if(kind && map[kind] === undefined) map[kind] = index;
+function baseParaCsv(mapa, data){
+  var linhas = Array.from(mapa.values()).sort(function(a, b){
+    return a.loja - b.loja || String(a.codigo).localeCompare(String(b.codigo), undefined, { numeric: true });
+  }).map(function(r){
+    return [r.loja, r.codigo, r.ean || '', semPontoVirgula(r.descricao), semPontoVirgula(r.classificacao), r.estoque || 0, precoCsv(r.venda), data].join(';');
   });
-  return map;
+  return [BASE_COLUNAS.join(';')].concat(linhas).join('\n');
 }
 
-function cellText(value){
-  if(typeof value === 'number') return Number.isInteger(value) ? String(value) : String(value);
-  return cleanText(value);
-}
-
-function cellPrice(value){
-  var text = cellText(value);
-  if(!text) return '';
-  var price = parsePrice(value);
-  return price === null ? text : formatDecimal(price);
-}
-
-// Converte a matriz da planilha (linhas × colunas) nas linhas editáveis da ferramenta.
-function parseSheetMatrix(matrix){
-  var headerIndex = -1, map = null;
-  for(var i = 0; i < Math.min(matrix.length, 30); i++){
-    var candidate = mapColumns(matrix[i]);
-    if(candidate.descricao !== undefined && candidate.por !== undefined){ headerIndex = i; map = candidate; break; }
-  }
-  if(headerIndex < 0) throw new Error('Não encontrei as colunas DESCRIÇÃO e PREÇO POR. Use a planilha modelo.');
-  var rows = [];
-  for(var r = headerIndex + 1; r < matrix.length; r++){
-    var line = matrix[r] || [];
-    function get(kind){ return map[kind] === undefined ? '' : line[map[kind]]; }
-    var row = {
-      descricao: cellText(get('descricao')),
-      codigo: cellText(get('codigo')),
-      ean: cellText(get('ean')).replace(/\s+/g, ''),
-      de: cellPrice(get('de')),
-      por: cellPrice(get('por')),
-      qtd: cellText(get('qtd'))
-    };
-    if(row.descricao || row.codigo || row.ean || row.de || row.por) rows.push(row);
-  }
-  return { rows: rows, headerRow: headerIndex + 1, colunas: Object.keys(map) };
-}
-
-/* =========================================================================
-   REGRAS DA ETIQUETA
-   ========================================================================= */
-function analyzeRow(row){
-  var descricao = cleanText(row.descricao).toLocaleUpperCase('pt-BR');
-  var codigo = cleanText(row.codigo), ean = cleanText(row.ean).replace(/\s+/g, '');
-  var deTexto = cleanText(row.de), porTexto = cleanText(row.por), qtdTexto = cleanText(row.qtd);
-  var de = parsePrice(deTexto), por = parsePrice(porTexto), qtd = 1;
-  var erros = [], avisos = [];
-  if(qtdTexto !== ''){
-    var q = Number(qtdTexto.replace(',', '.'));
-    if(Number.isInteger(q) && q >= 0) qtd = q;
-    else avisos.push('Quantidade inválida: sai 1 etiqueta');
-  }
-  if(!descricao) erros.push('Falta a descrição');
-  if(por === null || por <= 0) erros.push(porTexto ? 'Preço Por inválido' : 'Falta o preço Por');
-  if(deTexto && (de === null || de <= 0)) erros.push('Preço De inválido');
-  if(de !== null && de > 0 && por !== null && por > 0 && de <= por) avisos.push('Preço De não é maior que o Por');
-  if(ean && !gtinValido(ean)) avisos.push('Código de barras inválido');
-  if(qtd > 50) avisos.push('Quantidade alta: confira');
-  if(descricao){
-    var nome = fitText(descricao, true, LAYOUT.nome.tamanho, LAYOUT.nome.minimo, LAYOUT.larguraUtil * MM);
-    if(nome.cortado) avisos.push('Descrição longa: será cortada');
-    else if(nome.reduzido) avisos.push('Descrição longa: letra menor');
-  }
-  if(hasUnsupported(descricao + codigo + ean)) avisos.push('Caractere especial sairá como ?');
-  return {
-    descricao: descricao, codigo: codigo, ean: ean,
-    de: de !== null && de > 0 ? de : null, por: por, qtd: qtd,
-    erros: erros, avisos: avisos, imprime: !erros.length && qtd > 0
-  };
-}
-
-function expandLabels(rows){
-  var labels = [];
-  rows.forEach(function(row){
-    var info = analyzeRow(row);
-    if(!info.imprime) return;
-    for(var i = 0; i < info.qtd; i++) labels.push(info);
+/* ---------- Planilha "Produtos" do Infarma (matriz de linhas × colunas) ---------- */
+function lerPlanilhaMatriz(linhas){
+  var hi = linhas.findIndex(function(r){
+    return (r || []).some(function(c){ return String(c).trim() === 'Código'; }) &&
+           (r || []).some(function(c){ return /Prc\.?\s*Venda/i.test(String(c)); });
   });
-  return labels;
-}
-
-function paginate(labels){
-  var pages = [];
-  for(var i = 0; i < labels.length; i += LAYOUT.porFolha) pages.push(labels.slice(i, i + LAYOUT.porFolha));
-  return pages;
-}
-
-// Altura da folha para k etiquetas: 6 + 40 + (k − 1) × 49 + 6 mm (6 etiquetas = 297 mm).
-function pageHeightMm(count){
-  return LAYOUT.margem * 2 + LAYOUT.caixa.altura + LAYOUT.passo * (count - 1);
-}
-
-function summarize(rows){
-  var analyzed = rows.map(analyzeRow), labels = 0, produtos = 0, comErro = 0, semQuantidade = 0;
-  analyzed.forEach(function(info){
-    if(info.erros.length) comErro++;
-    else if(info.qtd === 0) semQuantidade++;
-    else { produtos++; labels += info.qtd; }
+  if(hi < 0) throw new Error('não achei as colunas "Código" e "Prc. Venda". Exporte pela tela Estoque › Produtos › Planilha.');
+  var H = linhas[hi].map(function(c){ return String(c).trim(); });
+  function col(re){ return H.findIndex(function(h){ return re.test(h); }); }
+  var cC = col(/^Código$/), cE = col(/Barras/i), cD = col(/^Descri/i), cK = col(/^Classifica/i), cS = col(/Est\.?\s*Disp/i), cV = col(/Prc\.?\s*Venda/i);
+  var recs = [];
+  linhas.slice(hi + 1).forEach(function(r){
+    r = r || [];
+    var codigo = String(r[cC] == null ? '' : r[cC]).trim(), v = brNum(r[cV]);
+    if(!codigo || isNaN(v)) return;
+    var ean = cE >= 0 ? String(r[cE] == null ? '' : r[cE]).trim() : '';
+    if(/e\+/i.test(ean)) ean = Number(r[cE]).toFixed(0);
+    recs.push({
+      codigo: codigo, ean: ean,
+      descricao: cD >= 0 ? String(r[cD] == null ? '' : r[cD]).trim() : '',
+      classificacao: cK >= 0 ? String(r[cK] == null ? '' : r[cK]).trim() : '',
+      estoque: cS >= 0 ? Math.round(brNum(r[cS]) || 0) : 0,
+      venda: Math.round(v * 100) / 100
+    });
   });
-  var folhas = Math.ceil(labels / LAYOUT.porFolha), ultima = labels ? labels - (folhas - 1) * LAYOUT.porFolha : 0;
-  return { linhas: rows.length, produtos: produtos, etiquetas: labels, folhas: folhas, ultima: ultima, alturaUltima: ultima ? pageHeightMm(ultima) : 0, comErro: comErro, semQuantidade: semQuantidade };
+  return recs;
 }
 
-/* =========================================================================
-   PDF
-   Gerador próprio: só fontes padrão (Helvetica), linhas, retângulos e o
-   logo. O texto fica como texto (selecionável e editável em editores de PDF).
-   ========================================================================= */
-function num(value){
-  var rounded = Math.round(value * 10000) / 10000;
-  return String(rounded === 0 ? 0 : rounded);
-}
+function lojaPeloNome(nome){ var m = /loja\s*0*(\d+)/i.exec(nome || ''); return m ? Number(m[1]) : null; }
 
-function pdfString(text){
-  var out = '(';
-  Array.from(String(text)).forEach(function(ch){
-    var code = encodeChar(ch);
-    if(code === null) code = 63; // ?
-    if(code === 40 || code === 41 || code === 92) out += '\\' + String.fromCharCode(code);
-    else if(code < 32 || code > 126) out += '\\' + code.toString(8).padStart(3, '0');
-    else out += String.fromCharCode(code);
+// A planilha não diz de qual loja é: compara o estoque com o da base. A loja certa bate em 90%+; as outras, em ~25%.
+function detectarLoja(recs, base){
+  if(!base) return null;
+  var melhor = null;
+  lojasDaBase(base).forEach(function(l){
+    var n = 0, ok = 0;
+    recs.forEach(function(r){ var b = base.get(chave(l, r.codigo)); if(!b) return; n++; if(b.estoque === r.estoque) ok++; });
+    var p = n ? ok / n : 0;
+    if(!melhor || p > melhor.p) melhor = { loja: l, p: p, n: n };
   });
-  return out + ')';
+  return melhor && melhor.p >= 0.6 && melhor.n >= 50 ? melhor : null;
 }
 
-function drawLabel(label, top, logo){
-  var L = LAYOUT, x = L.textoX * MM, ops = [];
-  function text(font, size, tx, ty, value){
-    ops.push('BT /' + font + ' ' + num(size) + ' Tf 1 0 0 1 ' + num(tx) + ' ' + num(ty) + ' Tm ' + pdfString(value) + ' Tj ET');
-  }
-  var g = num(L.caixa.cinza);
-  ops.push(g + ' ' + g + ' ' + g + ' RG ' + num(L.caixa.espessura) + ' w');
-  ops.push(num(L.caixa.x * MM) + ' ' + num(top - L.caixa.altura * MM) + ' ' + num(L.caixa.largura * MM) + ' ' + num(L.caixa.altura * MM) + ' re S');
-  ops.push('0 0 0 rg');
-
-  var nome = fitText(label.descricao, true, L.nome.tamanho, L.nome.minimo, L.larguraUtil * MM);
-  text('F2', nome.tamanho, x, top - L.nome.y * MM, nome.texto);
-  if(label.codigo){
-    var codigo = fitText('Código ' + label.codigo, true, L.codigo.tamanho, L.codigo.minimo, L.larguraAteLogo * MM);
-    text('F2', codigo.tamanho, x, top - L.codigo.y * MM, codigo.texto);
-  }
-  if(label.ean){
-    var barras = fitText('C Bar ' + label.ean, false, L.barras.tamanho, L.barras.minimo, L.larguraAteLogo * MM);
-    text('F1', barras.tamanho, x, top - L.barras.y * MM, barras.texto);
-  }
-  if(label.de !== null){
-    var yDe = top - L.de.y * MM, deX = x + textWidth('De ', false, L.de.tamanho);
-    text('F1', L.de.tamanho, x, yDe, 'De');
-    var antigo = fitText(formatPrice(label.de), true, L.de.precoTamanho, L.de.precoMinimo, L.larguraAteLogo * MM - (deX - x));
-    text('F2', antigo.tamanho, deX, yDe, antigo.texto);
-    var largura = textWidth(antigo.texto, true, antigo.tamanho), yRisco = yDe + L.de.risco * antigo.tamanho;
-    ops.push('0 0 0 RG ' + num(L.de.espessura) + ' w ' + num(deX - L.de.folga * MM) + ' ' + num(yRisco) + ' m ' + num(deX + largura + L.de.folga * MM) + ' ' + num(yRisco) + ' l S');
-    text('F2', L.por.tamanho, x, top - L.por.y * MM, 'Por');
-  }
-  var preco = fitText(formatPrice(label.por), true, L.preco.tamanho, L.preco.minimo, L.larguraPreco * MM);
-  text('F2', preco.tamanho, x, top - L.preco.y * MM, preco.texto);
-
-  if(logo){
-    var lw = L.logo.largura * MM, lh = lw * logo.altura / logo.largura;
-    ops.push('q ' + num(lw) + ' 0 0 ' + num(lh) + ' ' + num(L.logo.x * MM) + ' ' + num(top - L.logo.topo * MM - lh) + ' cm /Logo Do Q');
-  }
-  return ops.join('\n');
-}
-
-function drawPage(labels, logo){
-  var L = LAYOUT, height = pageHeightMm(labels.length) * MM, ops = [];
-  labels.forEach(function(label, i){
-    var top = height - (L.margem + L.passo * i) * MM;
-    ops.push(drawLabel(label, top, logo));
-    if(i < labels.length - 1){
-      var y = num(top - L.corte.y * MM), g = num(L.corte.cinza);
-      ops.push('[' + num(L.corte.traco) + ' ' + num(L.corte.traco) + '] 0 d ' + g + ' ' + g + ' ' + g + ' RG ' + num(L.corte.espessura) + ' w ' + num(L.corte.x1 * MM) + ' ' + y + ' m ' + num(L.corte.x2 * MM) + ' ' + y + ' l S [] 0 d');
-    }
+// arquivos: [{ nome, loja, recs }]. Devolve as linhas comparadas e os avisos.
+function conciliar(arquivos, base){
+  var linhas = [], avisos = [], vistas = {};
+  arquivos.forEach(function(f){
+    if(f.erro || !f.recs || !f.recs.length) return;
+    if(!f.loja){ avisos.push('Escolha a loja do arquivo <b>' + f.nome + '</b>. Enquanto isso ele fica de fora.'); return; }
+    if(vistas[f.loja]) avisos.push('Dois arquivos foram marcados como <b>' + nomeLoja(f.loja) + '</b>: ' + vistas[f.loja] + ' e ' + f.nome + '. Confira.');
+    vistas[f.loja] = f.nome;
+    f.recs.forEach(function(n){
+      var o = base.get(chave(f.loja, n.codigo)), tipo = 'new';
+      if(o){ var d = Math.round((n.venda - o.venda) * 100); tipo = d < 0 ? 'down' : d > 0 ? 'up' : 'eq'; }
+      linhas.push(Object.assign({}, n, { loja: f.loja, ean: n.ean || (o && o.ean) || '', de: o ? o.venda : null, por: n.venda, tipo: tipo }));
+    });
   });
-  return { altura: height, conteudo: ops.join('\n') + '\n' };
+  var faltam = lojasDaBase(base).filter(function(l){ return !vistas[l]; });
+  if(arquivos.length && faltam.length) avisos.push('Sem planilha hoje para: ' + faltam.map(nomeLoja).join(', ') + '.');
+  return { linhas: linhas, avisos: avisos };
 }
 
-function asciiBytes(str){
-  var out = new Uint8Array(str.length);
-  for(var i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 255;
-  return out;
-}
-
-function pdfDate(date){
-  function two(n){ return String(n).padStart(2, '0'); }
-  return 'D:' + date.getFullYear() + two(date.getMonth() + 1) + two(date.getDate()) + two(date.getHours()) + two(date.getMinutes()) + two(date.getSeconds());
-}
-
-// labels: saída de expandLabels; logo: { largura, altura, rgb, alfa } com streams Flate.
-function buildPdf(labels, logo, options){
-  options = options || {};
-  var pages = paginate(labels).map(function(page){ return drawPage(page, logo); });
-  var parts = [], length = 0, offsets = [];
-  function push(bytes){ parts.push(bytes); length += bytes.length; }
-  function write(str){ push(asciiBytes(str)); }
-  function object(id, dict, stream){
-    offsets[id] = length;
-    write(id + ' 0 obj\n' + dict.replace('%LEN%', stream ? stream.length : 0));
-    if(stream){ write('\nstream\n'); push(stream); write('\nendstream'); }
-    write('\nendobj\n');
-  }
-  var firstPage = logo ? 8 : 6, ids = pages.map(function(_, i){ return { page: firstPage + i * 2, content: firstPage + i * 2 + 1 }; });
-  write('%PDF-1.4\n%âãÏÓ\n');
-  object(1, '<< /Type /Catalog /Pages 2 0 R >>');
-  object(2, '<< /Type /Pages /Kids [' + ids.map(function(o){ return o.page + ' 0 R'; }).join(' ') + '] /Count ' + pages.length + ' >>');
-  object(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
-  object(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
-  object(5, '<< /Producer ' + pdfString('ConfereAI') + ' /Creator ' + pdfString('ConfereAI - Precificação') + ' /Title ' + pdfString('Etiquetas de preço') + ' /CreationDate ' + pdfString(pdfDate(options.data || new Date())) + ' >>');
-  if(logo){
-    object(6, '<< /Type /XObject /Subtype /Image /Width ' + logo.largura + ' /Height ' + logo.altura + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /SMask 7 0 R /Length %LEN% >>', logo.rgb);
-    object(7, '<< /Type /XObject /Subtype /Image /Width ' + logo.largura + ' /Height ' + logo.altura + ' /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length %LEN% >>', logo.alfa);
-  }
-  var resources = '<< /Font << /F1 3 0 R /F2 4 0 R >>' + (logo ? ' /XObject << /Logo 6 0 R >>' : '') + ' /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] >>';
-  pages.forEach(function(page, i){
-    object(ids[i].page, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + num(LAYOUT.larguraFolha * MM) + ' ' + num(page.altura) + '] /Resources ' + resources + ' /Contents ' + ids[i].content + ' 0 R >>');
-    object(ids[i].content, '<< /Length %LEN% >>', asciiBytes(page.conteudo));
+// Base nova: preço e estoque de hoje; produto que sumiu da planilha da loja fica com estoque 0 e o último preço.
+function atualizarBase(base, arquivos){
+  var m = new Map(base);
+  arquivos.forEach(function(f){
+    if(f.erro || !f.loja || !f.recs) return;
+    var hoje = new Set();
+    f.recs.forEach(function(n){
+      var k = chave(f.loja, n.codigo), o = m.get(k) || {};
+      hoje.add(n.codigo);
+      m.set(k, Object.assign({}, o, n, { loja: f.loja, ean: n.ean || o.ean || '' }));
+    });
+    m.forEach(function(r, k){ if(r.loja === f.loja && !hoje.has(r.codigo) && r.estoque !== 0) m.set(k, Object.assign({}, r, { estoque: 0 })); });
   });
-  var total = firstPage + pages.length * 2, xref = length;
-  var table = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
-  for(var id = 1; id < total; id++) table += String(offsets[id]).padStart(10, '0') + ' 00000 n \n';
-  write(table + 'trailer\n<< /Size ' + total + ' /Root 1 0 R /Info 5 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
-  var out = new Uint8Array(length), pos = 0;
-  parts.forEach(function(p){ out.set(p, pos); pos += p.length; });
-  return out;
+  return m;
+}
+
+function filtrar(linhas, f){
+  var q = String(f.busca || '').trim().toUpperCase(), min = Number(f.minimo) || 0;
+  return linhas.filter(function(r){
+    if(f.loja !== 'todas' && f.loja != null && r.loja !== f.loja) return false;
+    if(f.tipo === 'down' && r.tipo !== 'down') return false;
+    if(f.tipo === 'up' && r.tipo !== 'up') return false;
+    if(f.tipo === 'new' && r.tipo !== 'new') return false;
+    if(f.tipo === 'changed' && r.tipo === 'eq') return false;
+    if(f.classe && r.classificacao !== f.classe) return false;
+    if(f.soEstoque && !(r.estoque > 0)) return false;
+    if(r.por < min || (r.de != null && r.de < min)) return false;
+    if(q && !(r.descricao.toUpperCase().includes(q) || String(r.codigo).includes(q) || String(r.ean || '').includes(q))) return false;
+    return true;
+  });
+}
+
+function contar(linhas){
+  var c = { down: 0, up: 0, new: 0, eq: 0 };
+  linhas.forEach(function(r){ c[r.tipo]++; });
+  return c;
 }
 
 /* ======================== INTERFACE ======================== */
-var STORAGE_MODELO = 'confereai-precificacao-modelo';
-var FIELD_LABELS = { descricao: 'Descrição', codigo: 'Código', ean: 'Código de barras', de: 'Preço De', por: 'Preço Por', qtd: 'Quantidade' };
-var state = { rows: [], nextId: 1, fileName: '', modelo: 'cor', logos: null, logosErro: false, url: null, timer: null };
-try{ var salvo = localStorage.getItem(STORAGE_MODELO); if(salvo === 'cor' || salvo === 'pb') state.modelo = salvo; }catch(e){}
+
+var LOGO_URL = 'ferramentas/precificacao/logo_etiqueta.png';
+var FONTES_URL = 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&family=Inter:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap';
+var JSBARCODE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js';
+
+// Visual das etiquetas: usado na prévia e na janela de impressão.
+var LABEL_CSS = [
+  '.prec-sheet{--f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;--f-body:"Inter",system-ui,Arial,sans-serif;--f-mono:"JetBrains Mono",Consolas,monospace;background:#fff;color:#111;padding:8mm;display:flex;flex-direction:column;gap:6mm}',
+  '.prec-sheet *{box-sizing:border-box}',
+  '.prec-sheet .grid{display:grid;gap:2mm;justify-content:start}',
+  '.prec-sheet .grp-h{margin:0 0 2.5mm;font:800 15pt/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em;color:#111;display:flex;align-items:baseline;gap:4mm;border-bottom:1.5px solid #111;padding-bottom:1.5mm}',
+  '.prec-sheet .grp-h span{font:500 8pt/1 var(--f-body);color:#555;text-transform:none;letter-spacing:0}',
+  '.prec-sheet .empty{padding:30px;text-align:center;color:#555;font:13px var(--f-body)}',
+  '.lbl{-webkit-print-color-adjust:exact;print-color-adjust:exact;width:var(--lw);height:var(--lh);border:1px dashed #9aa;border-radius:2mm;padding:2mm 2.5mm;display:flex;flex-direction:column;overflow:hidden;break-inside:avoid;background:#fff;color:#111}',
+  '.lbl .top{display:flex;gap:2mm;align-items:center}',
+  '.lbl .logo{flex:none;height:calc(var(--s)*8mm);width:auto;display:block}',
+  '.lbl .name{flex:1;min-width:0;font:700 calc(var(--s)*8.5pt)/1.15 var(--f-body);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-transform:uppercase}',
+  '.lbl .prices{display:flex;align-items:flex-end;justify-content:space-between;gap:2mm;margin-top:auto}',
+  '.lbl .de{font:500 calc(var(--s)*8pt)/1 var(--f-body);color:#444}',
+  '.lbl .de s{text-decoration-thickness:1.5px}',
+  '.lbl .por{display:flex;align-items:flex-start;gap:.6mm;font-family:var(--f-display);font-weight:800;line-height:.85;color:#111}',
+  '.lbl .por .rs{font-size:calc(var(--s)*10pt);margin-top:1mm}',
+  '.lbl .por .val{font-size:calc(var(--s)*30pt)}',
+  '.lbl .por .cents{font-size:calc(var(--s)*15pt)}',
+  '.lbl .tr{display:flex;flex-direction:column;align-items:flex-end;gap:.8mm;align-self:flex-start}',
+  '.lbl .tag{background:#c8102e;color:#fff;padding:.6mm 1.6mm;border-radius:1mm;font:700 calc(var(--s)*6.5pt)/1 var(--f-body);text-transform:uppercase;letter-spacing:.04em}',
+  '.lbl .off{font:800 calc(var(--s)*13pt)/1 var(--f-display);background:#c8102e;color:#fff;border-radius:1.2mm;padding:.8mm 1.6mm}',
+  '.lbl .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:2mm;margin-top:1mm}',
+  '.lbl .bcw{display:flex;flex-direction:column;max-width:64%;min-width:0}',
+  '.lbl .foot svg{height:calc(var(--s)*9mm);width:auto;max-width:100%}',
+  '.lbl .meta{font:400 calc(var(--s)*6pt)/1.2 var(--f-mono);color:#555;text-align:right}',
+  '.lbl .meta .cod{font:700 calc(var(--s)*7.5pt)/1 var(--f-mono);color:#000}',
+  '.lbl.plain .por .val{font-size:calc(var(--s)*32pt)}',
+  '.lbl.plain .prices{margin-top:3.5mm}',
+  '.lbl.plain .foot{margin-top:auto}',
+  '.prec-sheet.termica{width:calc(80mm + 16mm)}',
+  '.prec-sheet.termica .grp-h{font-size:12pt;gap:2mm;flex-wrap:wrap}',
+  '.prec-sheet.termica .lbl{border:none;border-bottom:1px dashed #000;border-radius:0}',
+  '.prec-sheet.termica .tag,.prec-sheet.termica .off{background:#000}',
+  '.prec-sheet.termica .de,.prec-sheet.termica .meta{color:#000}'
+].join('\n');
 
 function el(id){ return document.getElementById(id); }
-function escapeHtml(value){ return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function plural(n, um, varios){ return n + ' ' + (n === 1 ? um : varios); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function brl(v){ return v == null || isNaN(v) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function avisar(msg, erro){ if(typeof showToast === 'function') showToast(msg, erro); }
 
-function base64ToBytes(b64){
-  var bin = atob(b64), out = new Uint8Array(bin.length);
-  for(var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+var S = { base: null, baseData: '', arquivos: [], linhas: [], loja: 'todas', fora: new Set(), dataHoje: dataHoje(), classeEscolhida: false };
+
+/* ---------- Recursos externos (fonte da etiqueta e código de barras) ---------- */
+var estiloEtiqueta = document.createElement('style');
+estiloEtiqueta.id = 'precLabelCss';
+estiloEtiqueta.textContent = LABEL_CSS;
+document.head.appendChild(estiloEtiqueta);
+var linkFontes = document.createElement('link');
+linkFontes.rel = 'stylesheet'; linkFontes.href = FONTES_URL; linkFontes.id = 'precFontes';
+document.head.appendChild(linkFontes);
+
+function carregarJsBarcode(){
+  if(window.JsBarcode) return Promise.resolve();
+  if(carregarJsBarcode.p) return carregarJsBarcode.p;
+  carregarJsBarcode.p = new Promise(function(ok){
+    var s = document.createElement('script');
+    s.src = JSBARCODE_URL; s.onload = ok; s.onerror = ok;
+    document.head.appendChild(s);
+  });
+  return carregarJsBarcode.p;
+}
+carregarJsBarcode().then(function(){ if(S.linhas.length) renderEtiquetas(); });
+
+// O logo vai embutido na janela de impressão, para não depender do endereço do site.
+var logoDados = '';
+fetch(LOGO_URL).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){
+  if(!b) return;
+  var leitor = new FileReader();
+  leitor.onload = function(){ logoDados = leitor.result; };
+  leitor.readAsDataURL(b);
+}).catch(function(){});
+
+/* ---------- Passo 1: base ---------- */
+function mostrarBase(extra){
+  el('precStBase').className = 'prec-status ok';
+  el('precStBase').innerHTML = '<b>' + S.base.size.toLocaleString('pt-BR') + '</b> preços · lojas ' + lojasDaBase(S.base).join(', ') +
+    ' · base de <b>' + esc(S.baseData || '?') + '</b> ' + (extra || '');
+  if(!S.arquivos.length) el('precStNew').textContent = 'Agora arraste as planilhas de hoje (uma por loja).';
 }
 
-async function carregarLogos(){
-  try{
-    var resp = await fetch('ferramentas/precificacao/logo_etiqueta.json', { cache: 'no-cache' });
-    if(!resp.ok) throw new Error('HTTP ' + resp.status);
-    var data = await resp.json();
-    function decode(m){ return { largura: data.largura, altura: data.altura, rgb: base64ToBytes(m.rgb), alfa: base64ToBytes(m.alfa) }; }
-    state.logos = { cor: decode(data.cor), pb: decode(data.pb) };
-  }catch(err){
-    console.error('Logo das etiquetas:', err);
-    state.logosErro = true;
-    showToast('Não foi possível carregar o logo das etiquetas. Recarregue a página.', true);
+function aoReceberBase(arquivos){
+  var file = arquivos[0];
+  if(!file) return;
+  el('precStBase').className = 'prec-status';
+  el('precStBase').textContent = 'Lendo ' + file.name + '…';
+  file.text().then(function(texto){
+    var r = lerBaseCsv(texto);
+    if(!r.recs.length) throw new Error('nenhum produto no arquivo.');
+    S.base = paraMapa(r.recs); S.baseData = r.data;
+    mostrarBase();
+    S.arquivos.forEach(function(f){ if(f.recs){ var d = detectarLoja(f.recs, S.base); f.det = d; if(d) f.loja = d.loja; } });
+    renderArquivos();
+    if(S.arquivos.length) recalcular();
+  }).catch(function(e){ el('precStBase').textContent = 'Não consegui ler: ' + e.message; });
+}
+
+/* ---------- Passo 1: planilhas ---------- */
+function lerPlanilha(file){
+  if(!window.XLSX) return Promise.reject(new Error('a biblioteca de Excel não carregou. Confira a internet e recarregue a página.'));
+  return file.arrayBuffer().then(function(buf){
+    var wb = XLSX.read(buf, { type: 'array' });
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    return lerPlanilhaMatriz(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }));
+  });
+}
+
+function aoReceberPlanilhas(arquivos){
+  if(!S.base){ el('precStNew').textContent = 'Carregue a base primeiro.'; return; }
+  if(typeof showOverlay === 'function') showOverlay('Lendo planilhas…');
+  Promise.all(arquivos.map(function(file){
+    return lerPlanilha(file).then(function(recs){
+      var det = detectarLoja(recs, S.base), pelo = lojaPeloNome(file.name);
+      return { nome: file.name, recs: recs, det: det, pelo: pelo, loja: det ? det.loja : pelo };
+    }).catch(function(e){ return { nome: file.name, erro: e.message, recs: [] }; });
+  })).then(function(novos){
+    novos.forEach(function(n){
+      S.arquivos = S.arquivos.filter(function(f){ return f.nome !== n.nome; });
+      S.arquivos.push(n);
+    });
+    S.dataHoje = dataHoje(); S.fora.clear();
+    renderArquivos(); recalcular();
+  }).finally(function(){ if(typeof hideOverlay === 'function') hideOverlay(); });
+}
+
+function renderArquivos(){
+  var st = el('precStNew'), ok = S.arquivos.some(function(f){ return !f.erro; });
+  st.className = 'prec-status' + (ok ? ' ok' : '');
+  if(!S.arquivos.length){ st.textContent = S.base ? 'Arraste as planilhas de hoje.' : 'Carregue a base primeiro.'; return; }
+  var lojas = [''].concat(S.base ? lojasDaBase(S.base) : []);
+  st.innerHTML = '<div class="prec-flist">' + S.arquivos.map(function(f, i){
+    if(f.erro) return '<div class="prec-frow bad"><span class="fname">' + esc(f.nome) + '</span><span>Não consegui ler: ' + esc(f.erro) + '</span><button class="x" data-rm="' + i + '" type="button" aria-label="Remover">×</button></div>';
+    var conflito = f.det && f.pelo && f.det.loja !== f.pelo;
+    return '<div class="prec-frow' + (conflito ? ' alert' : '') + '"><span class="fname">' + esc(f.nome) + '</span><span>' + f.recs.length.toLocaleString('pt-BR') + ' produtos</span>' +
+      '<label>é a <select data-i="' + i + '">' + lojas.map(function(l){
+        return '<option value="' + l + '"' + (l === f.loja ? ' selected' : '') + '>' + (l === '' ? 'escolha a loja' : esc(nomeLoja(l))) + '</option>';
+      }).join('') + '</select></label>' +
+      '<span class="muted">' + (f.det ? 'detectada pelo estoque (' + Math.round(f.det.p * 100) + '% igual)' + (conflito ? ' · o nome do arquivo diz loja ' + f.pelo : '') : 'pelo nome do arquivo: confira!') + '</span>' +
+      '<button class="x" data-rm="' + i + '" type="button" aria-label="Remover">×</button></div>';
+  }).join('') + '</div>';
+  st.querySelectorAll('select[data-i]').forEach(function(s){
+    s.onchange = function(){ S.arquivos[Number(s.dataset.i)].loja = s.value ? Number(s.value) : null; renderArquivos(); recalcular(); };
+  });
+  st.querySelectorAll('button[data-rm]').forEach(function(b){
+    b.onclick = function(){ S.arquivos.splice(Number(b.dataset.rm), 1); renderArquivos(); recalcular(); };
+  });
+}
+
+/* ---------- Passo 2: conciliação ---------- */
+function filtrosAtuais(loja){
+  return {
+    loja: loja === undefined ? S.loja : loja, tipo: el('precTipo').value, classe: el('precClass').value,
+    soEstoque: el('precEstoque').checked, minimo: el('precMin').value, busca: el('precBusca').value
+  };
+}
+
+function recalcular(){
+  var r = conciliar(S.arquivos, S.base);
+  S.linhas = r.linhas;
+  el('precWarn').hidden = !r.avisos.length;
+  el('precWarn').innerHTML = r.avisos.join('<br>');
+  var classes = Array.from(new Set(S.linhas.map(function(x){ return x.classificacao; }).filter(Boolean))).sort();
+  var atual = el('precClass').value;
+  var alvo = S.classeEscolhida ? atual : (classes.indexOf('PERFUMARIA') >= 0 ? 'PERFUMARIA' : atual);
+  el('precClass').innerHTML = '<option value="">Todas</option>' + classes.map(function(c){
+    return '<option' + (c === alvo ? ' selected' : '') + '>' + esc(c) + '</option>';
+  }).join('');
+  el('precResults').hidden = !S.linhas.length;
+  el('precHow').hidden = !!S.linhas.length;
+  if(S.linhas.length){ renderResumo(); renderTabela(); }
+}
+
+function renderResumo(){
+  var lojas = Array.from(new Set(S.linhas.map(function(r){ return r.loja; }))).sort(function(a, b){ return a - b; });
+  function card(l, titulo){
+    var f = filtrosAtuais(l); f.tipo = 'all'; f.busca = '';
+    var c = contar(filtrar(S.linhas, f));
+    return '<button class="prec-store" type="button" data-loja="' + l + '" aria-pressed="' + (S.loja === l) + '"><div class="n">' + titulo + '</div>' +
+      '<div class="prec-chips"><span class="prec-chip c-down">↓ ' + c.down + '</span><span class="prec-chip c-up">↑ ' + c.up + '</span><span class="prec-chip c-new">novo ' + c.new + '</span></div></button>';
   }
-  agendarPrevia(0);
-}
-
-/* ---------- Importação ---------- */
-var dropzone = el('precDropzone'), fileInput = el('precFileInput');
-dropzone.addEventListener('click', function(){ fileInput.click(); });
-dropzone.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); fileInput.click(); } });
-['dragenter', 'dragover'].forEach(function(ev){ dropzone.addEventListener(ev, function(e){ e.preventDefault(); dropzone.classList.add('drag'); }); });
-['dragleave', 'drop'].forEach(function(ev){ dropzone.addEventListener(ev, function(e){ e.preventDefault(); dropzone.classList.remove('drag'); }); });
-dropzone.addEventListener('drop', function(e){ var f = (e.dataTransfer.files || [])[0]; if(f) importarArquivo(f); });
-fileInput.addEventListener('change', function(){ var f = fileInput.files[0]; fileInput.value = ''; if(f) importarArquivo(f); });
-
-async function importarArquivo(file){
-  var ext = file.name.split('.').pop().toLowerCase();
-  if(['xlsx', 'xls', 'csv'].indexOf(ext) < 0){ showToast('Formato não suportado: envie .xlsx, .xls ou .csv.', true); return; }
-  showOverlay('Lendo planilha…');
-  try{
-    var wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    var resultado = null, ultimoErro = null;
-    for(var i = 0; i < wb.SheetNames.length && !resultado; i++){
-      var matrix = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header: 1, raw: true, defval: '' });
-      try{ resultado = parseSheetMatrix(matrix); }catch(err){ ultimoErro = err; }
-    }
-    if(!resultado) throw ultimoErro || new Error('Planilha vazia.');
-    if(!resultado.rows.length) throw new Error('Não há produtos preenchidos abaixo do cabeçalho.');
-    state.rows = resultado.rows.map(function(row){ return Object.assign({ id: state.nextId++ }, row); });
-    state.fileName = file.name;
-    mostrarTrabalho();
-    showToast(plural(resultado.rows.length, 'produto importado', 'produtos importados') + '.');
-  }catch(err){
-    console.error(err);
-    showToast('Erro ao ler a planilha: ' + err.message, true);
-  }finally{
-    hideOverlay();
-  }
-}
-
-var MODELO_ARQUIVO = 'modelo_etiquetas_preco.xlsx';
-
-function baixarArquivo(blob, nome){
-  var url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url; a.download = nome;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
-}
-
-// Baixa a planilha formatada (gerada por scripts/gerar-modelo-etiquetas.cjs).
-// Se o arquivo não estiver disponível, monta uma versão simples no navegador.
-el('btnPrecModelo').addEventListener('click', async function(){
-  try{
-    var resp = await fetch('ferramentas/precificacao/' + MODELO_ARQUIVO, { cache: 'no-cache' });
-    if(!resp.ok) throw new Error('HTTP ' + resp.status);
-    baixarArquivo(new Blob([await resp.arrayBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), MODELO_ARQUIVO);
-  }catch(err){
-    console.warn('Planilha modelo pronta indisponível; gerando no navegador.', err);
-    gerarModeloNoNavegador();
-  }
-});
-
-function gerarModeloNoNavegador(){
-  var aoa = [TEMPLATE_HEADERS].concat(TEMPLATE_EXAMPLES);
-  var ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 40 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 11 }, { wch: 13 }];
-  for(var r = 2; r <= aoa.length; r++) ['D', 'E'].forEach(function(col){ if(ws[col + r]) ws[col + r].z = '0.00'; });
-  var info = XLSX.utils.aoa_to_sheet(TEMPLATE_INSTRUCTIONS.map(function(line){ return [line]; }));
-  info['!cols'] = [{ wch: 110 }];
-  var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Etiquetas');
-  XLSX.utils.book_append_sheet(wb, info, 'Como preencher');
-  XLSX.writeFile(wb, MODELO_ARQUIVO);
-}
-
-el('btnPrecManual').addEventListener('click', function(){
-  if(!state.rows.length){ state.rows = [novaLinha()]; state.fileName = ''; }
-  mostrarTrabalho();
-  focarLinha(state.rows[state.rows.length - 1].id);
-});
-
-function novaLinha(){ return { id: state.nextId++, descricao: '', codigo: '', ean: '', de: '', por: '', qtd: '' }; }
-
-function focarLinha(id){
-  var input = document.querySelector('#precBody tr[data-id="' + id + '"] input[data-field="descricao"]');
-  if(input){ input.focus(); input.scrollIntoView({ block: 'nearest' }); }
-}
-
-function mostrarTrabalho(){
-  el('precWork').hidden = false;
-  var card = el('precFile');
-  card.hidden = !state.fileName;
-  el('precFileName').textContent = state.fileName;
-  renderTabela();
-  atualizarResumo();
-  agendarPrevia(0);
-}
-
-function limparTudo(){
-  state.rows = []; state.fileName = '';
-  el('precWork').hidden = true; el('precFile').hidden = true;
-  agendarPrevia(0);
-}
-el('btnPrecLimpar').addEventListener('click', limparTudo);
-el('btnPrecRemoverArquivo').addEventListener('click', limparTudo);
-el('btnPrecAdd').addEventListener('click', function(){
-  var row = novaLinha();
-  state.rows.push(row);
-  renderTabela(); atualizarResumo();
-  focarLinha(row.id);
-});
-
-/* ---------- Tabela editável ---------- */
-var body = el('precBody');
-
-function inputCell(row, field, cls, placeholder, mode){
-  return '<td><input class="prec-in ' + cls + '" data-field="' + field + '" value="' + escapeHtml(row[field]) + '" placeholder="' + placeholder + '"' + (mode ? ' inputmode="' + mode + '"' : '') + ' aria-label="' + FIELD_LABELS[field] + '" autocomplete="off"></td>';
+  el('precSummary').innerHTML = card('todas', 'Todas as lojas') + lojas.map(function(l){ return card(l, 'Loja ' + l); }).join('');
+  el('precSummary').querySelectorAll('.prec-store').forEach(function(b){
+    b.onclick = function(){ var v = b.dataset.loja; S.loja = v === 'todas' ? 'todas' : Number(v); renderResumo(); renderTabela(); };
+  });
 }
 
 function renderTabela(){
-  body.innerHTML = state.rows.map(function(row, index){
-    return '<tr data-id="' + row.id + '"><td class="prec-idx">' + (index + 1) + '</td>' +
-      inputCell(row, 'descricao', 'prec-in-desc', 'Ex.: DIPIRONA 500MG C/10 COMP') +
-      inputCell(row, 'codigo', 'prec-in-code', 'Código', 'numeric') +
-      inputCell(row, 'ean', 'prec-in-ean', '13 dígitos', 'numeric') +
-      inputCell(row, 'de', 'prec-in-money', 'Opcional', 'decimal') +
-      inputCell(row, 'por', 'prec-in-money', '0,00', 'decimal') +
-      inputCell(row, 'qtd', 'prec-in-qtd', '1', 'numeric') +
-      '<td class="prec-status"></td><td class="prec-actions-cell"><button class="prec-remove" type="button" data-remove="' + row.id + '" title="Remover produto" aria-label="Remover produto ' + (index + 1) + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></td></tr>';
-  }).join('');
-  Array.from(body.rows).forEach(function(tr){ atualizarLinha(tr, encontrarLinha(tr.dataset.id)); });
-}
-
-function encontrarLinha(id){ return state.rows.find(function(row){ return String(row.id) === String(id); }); }
-
-function atualizarLinha(tr, row){
-  var info = analyzeRow(row), status = tr.querySelector('.prec-status'), html;
-  if(info.erros.length) html = '<span class="badge b-red" title="' + escapeHtml(info.erros.concat(info.avisos).join(' · ')) + '">' + escapeHtml(info.erros[0]) + '</span>';
-  else if(info.qtd === 0) html = '<span class="badge b-gray">Não imprime</span>';
-  else if(info.avisos.length) html = '<span class="badge b-amber" title="' + escapeHtml(info.avisos.join(' · ')) + '">' + escapeHtml(info.avisos[0]) + '</span>';
-  else html = '<span class="badge b-green">' + plural(info.qtd, 'etiqueta', 'etiquetas') + '</span>';
-  status.innerHTML = html;
-  tr.classList.toggle('prec-row-error', info.erros.length > 0);
-  tr.classList.toggle('prec-row-off', !info.erros.length && info.qtd === 0);
-  tr.querySelector('[data-field="descricao"]').classList.toggle('prec-invalid', !info.descricao);
-  tr.querySelector('[data-field="por"]').classList.toggle('prec-invalid', info.por === null || info.por <= 0);
-}
-
-body.addEventListener('input', function(e){
-  var input = e.target.closest('input[data-field]');
-  if(!input) return;
-  var tr = input.closest('tr'), row = encontrarLinha(tr.dataset.id);
-  row[input.dataset.field] = input.value;
-  atualizarLinha(tr, row); atualizarResumo(); agendarPrevia();
-});
-body.addEventListener('change', function(e){
-  var input = e.target.closest('input[data-field="de"], input[data-field="por"]');
-  if(!input) return;
-  var price = parsePrice(input.value);
-  if(price !== null && price > 0){ input.value = formatDecimal(price); encontrarLinha(input.closest('tr').dataset.id)[input.dataset.field] = input.value; }
-});
-body.addEventListener('click', function(e){
-  var button = e.target.closest('[data-remove]');
-  if(!button) return;
-  state.rows = state.rows.filter(function(row){ return String(row.id) !== button.dataset.remove; });
-  renderTabela(); atualizarResumo(); agendarPrevia(0);
-});
-
-function atualizarResumo(){
-  var s = summarize(state.rows);
-  el('precCount').textContent = plural(s.linhas, 'produto', 'produtos');
-  el('precSummary').textContent = s.etiquetas ? plural(s.etiquetas, 'etiqueta', 'etiquetas') + ' · ' + plural(s.folhas, 'folha', 'folhas') : 'Nenhuma etiqueta pronta';
-  var linhas = [
-    ['Etiquetas', String(s.etiquetas)],
-    ['Folhas', s.folhas ? String(s.folhas) : '—'],
-    ['Última folha', !s.etiquetas ? '—' : s.ultima === LAYOUT.porFolha ? 'Completa · 297 mm' : plural(s.ultima, 'etiqueta', 'etiquetas') + ' · ' + s.alturaUltima + ' mm']
-  ];
-  if(s.comErro) linhas.push(['Fora da impressão', plural(s.comErro, 'linha com erro', 'linhas com erro')]);
-  if(s.semQuantidade) linhas.push(['Quantidade zero', plural(s.semQuantidade, 'produto', 'produtos')]);
-  el('precSheets').innerHTML = linhas.map(function(l){ return '<div><dt>' + l[0] + '</dt><dd>' + escapeHtml(l[1]) + '</dd></div>'; }).join('');
-  el('precSheets').classList.toggle('has-errors', s.comErro > 0);
-}
-
-/* ---------- Modelo, prévia e saída ---------- */
-document.querySelectorAll('input[name="precModelo"]').forEach(function(radio){
-  radio.checked = radio.value === state.modelo;
-  radio.addEventListener('change', function(){
-    if(!radio.checked) return;
-    state.modelo = radio.value;
-    try{ localStorage.setItem(STORAGE_MODELO, state.modelo); }catch(e){}
-    agendarPrevia(0);
-  });
-});
-
-function agendarPrevia(delay){
-  clearTimeout(state.timer);
-  state.timer = setTimeout(gerarPrevia, delay === undefined ? 400 : delay);
-}
-
-function gerarPrevia(){
-  clearTimeout(state.timer);
-  var labels = expandLabels(state.rows), pronto = labels.length > 0 && !!state.logos;
-  if(state.url){ URL.revokeObjectURL(state.url); state.url = null; }
-  el('btnPrecBaixar').disabled = !pronto;
-  el('btnPrecImprimir').disabled = !pronto;
-  var frame = el('precPreview'), vazio = el('precPreviewEmpty');
-  if(!pronto){
-    frame.hidden = true; frame.removeAttribute('src');
-    vazio.hidden = false;
-    el('precPreviewMsg').textContent = state.logosErro ? 'O logo não carregou. Recarregue a página para gerar as etiquetas.' : !state.logos && labels.length ? 'Carregando o logo das etiquetas…' : 'Preencha a descrição e o preço Por de pelo menos um produto.';
-    return false;
+  var linhas = filtrar(S.linhas, filtrosAtuais()), tb = el('precBody');
+  if(!linhas.length){
+    tb.innerHTML = '<tr><td colspan="9" class="empty">Nenhum produto com esses filtros.</td></tr>';
+  } else {
+    tb.innerHTML = linhas.slice(0, 3000).map(function(r){
+      var k = chave(r.loja, r.codigo), pct = r.de ? (r.por - r.de) / r.de * 100 : null;
+      return '<tr><td><input type="checkbox" data-k="' + esc(k) + '"' + (S.fora.has(k) ? '' : ' checked') + ' aria-label="Incluir na impressão"></td>' +
+        '<td>' + r.loja + '</td><td class="code">' + esc(r.codigo) + '<br><small>' + esc(r.ean || '') + '</small></td>' +
+        '<td class="desc">' + esc(r.descricao) + '</td><td class="num">' + brl(r.de) + '</td><td class="num"><b>' + brl(r.por) + '</b></td>' +
+        '<td class="num ' + (r.tipo === 'down' ? 'c-down' : r.tipo === 'up' ? 'c-up' : '') + '">' + (pct == null ? '—' : (pct > 0 ? '+' : '') + pct.toFixed(1).replace('.', ',') + '%') + '</td>' +
+        '<td class="num">' + r.estoque + '</td><td><span class="prec-pill ' + TIPOS[r.tipo][1] + '">' + TIPOS[r.tipo][0] + '</span></td></tr>';
+    }).join('') + (linhas.length > 3000 ? '<tr><td colspan="9" class="empty">Mostrando 3.000 de ' + linhas.length.toLocaleString('pt-BR') + '. Use a busca ou escolha uma loja.</td></tr>' : '');
   }
-  var bytes = buildPdf(labels, state.logos[state.modelo]);
-  state.url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-  frame.src = state.url + '#toolbar=1&navpanes=0&view=FitH';
-  frame.hidden = false; vazio.hidden = true;
-  return true;
+  tb.querySelectorAll('input[type=checkbox]').forEach(function(c){
+    c.onchange = function(){ if(c.checked) S.fora.delete(c.dataset.k); else S.fora.add(c.dataset.k); renderEtiquetas(); };
+  });
+  renderEtiquetas();
 }
 
-function nomeArquivo(){
-  var d = new Date();
-  return 'etiquetas_' + (state.modelo === 'pb' ? 'pb_' : '') + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.pdf';
+/* ---------- Passo 3: etiquetas ---------- */
+function medidas(){
+  var termica = el('precPapel').value === 'termica';
+  var lw, lh;
+  if(termica){ lw = 72; lh = 40; } else { var m = el('precSize').value.split('x').map(Number); lw = m[0]; lh = m[1]; }
+  return { termica: termica, lw: lw, lh: lh, escala: Math.max(0.72, Math.min(lw / 66, 1.35)) };
 }
 
-el('btnPrecBaixar').addEventListener('click', function(){
-  if(!gerarPrevia()) return;
+function htmlEtiqueta(r, i, comBarras){
+  var promo = r.tipo === 'down' && r.de != null;
+  var partes = r.por.toFixed(2).split('.');
+  var off = promo ? Math.round((1 - r.por / r.de) * 100) : 0;
+  var barras = comBarras ? codigoBarras(r.ean) : '';
+  return '<div class="lbl ' + (promo ? '' : 'plain') + '">' +
+    '<div class="top"><img class="logo" src="' + LOGO_URL + '" alt="Rede Lucena"><div class="name">' + esc(nomeEtiqueta(r.descricao)) + '</div></div>' +
+    '<div class="prices"><div>' + (promo ? '<div class="de">De <s>R$ ' + brl(r.de) + '</s></div>' : '') +
+      '<div class="por"><span class="rs">' + (promo ? 'Por R$' : 'R$') + '</span><span class="val">' + Number(partes[0]).toLocaleString('pt-BR') + '</span><span class="cents">,' + partes[1] + '</span></div></div>' +
+      (promo ? '<div class="tr"><span class="tag">Oferta</span>' + (off >= 1 ? '<div class="off">-' + off + '%</div>' : '') + '</div>' : '') + '</div>' +
+    '<div class="foot"><div class="bcw">' + (barras ? '<svg data-code="' + esc(barras) + '"></svg>' : '') + '</div>' +
+      '<div class="meta"><span class="cod">Cód. ' + esc(r.codigo) + '</span><br>' + esc(r.ean || '') + '</div></div></div>';
+}
+
+function renderEtiquetas(){
+  var linhas = filtrar(S.linhas, filtrosAtuais()).filter(function(r){ return !S.fora.has(chave(r.loja, r.codigo)); });
+  var md = medidas(), sheet = el('precSheet'), comBarras = el('precBarcode').checked;
+  el('precWrapSize').hidden = md.termica;
+  sheet.classList.toggle('termica', md.termica);
+  sheet.style.setProperty('--lw', md.lw + 'mm');
+  sheet.style.setProperty('--lh', md.lh + 'mm');
+  sheet.style.setProperty('--s', md.escala);
+  el('precLblCount').textContent = linhas.length.toLocaleString('pt-BR');
+  var lista = linhas.slice(0, 1500).sort(function(a, b){ return a.loja - b.loja || a.descricao.localeCompare(b.descricao); });
+  var grupos = [];
+  lista.forEach(function(r, i){
+    var g = grupos[grupos.length - 1];
+    if(!g || g.loja !== r.loja){ g = { loja: r.loja, html: [] }; grupos.push(g); }
+    g.html.push(htmlEtiqueta(r, i, comBarras));
+  });
+  sheet.innerHTML = grupos.length ? grupos.map(function(g){
+    return '<section class="grp"><h3 class="grp-h">' + esc(nomeLoja(g.loja)) + '<span>' + g.html.length + ' etiqueta' + (g.html.length > 1 ? 's' : '') + '</span></h3>' +
+      '<div class="grid" style="grid-template-columns:repeat(auto-fill,' + md.lw + 'mm)">' + g.html.join('') + '</div></section>';
+  }).join('') : '<div class="empty">Nenhuma etiqueta selecionada.</div>';
+  if(comBarras && window.JsBarcode){
+    sheet.querySelectorAll('svg[data-code]').forEach(function(s){
+      var c = s.dataset.code;
+      try{ JsBarcode(s, c, { format: eanValido(c) ? (c.length === 13 ? 'EAN13' : 'EAN8') : 'CODE128', displayValue: false, margin: 0, height: 40, width: 1.4, background: 'transparent' }); }
+      catch(e){ s.remove(); }
+    });
+  }
+  el('btnPrecPrint').disabled = !grupos.length;
+}
+
+/* ---------- Impressão e arquivos ---------- */
+function imprimir(){
+  var md = medidas(), sheet = el('precSheet');
+  var pagina = md.termica ? '@page{size:80mm 297mm;margin:4mm}' : '@page{size:A4;margin:6mm}';
+  var absoluto = location.href.split('#')[0].replace(/[^/]*$/, '') + LOGO_URL;
+  var html = sheet.outerHTML.split('src="' + LOGO_URL + '"').join('src="' + (logoDados || absoluto) + '"');
+  var w = window.open('', '_blank');
+  if(!w){ avisar('O navegador bloqueou a janela de impressão. Libere pop-ups para este site.', true); return; }
+  w.document.open();
+  w.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(S.dataHoje) + '</title>' +
+    '<link rel="stylesheet" href="' + FONTES_URL + '"><style>' + LABEL_CSS + '\nbody{margin:0;background:#fff}\n' + pagina +
+    '\n@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.prec-sheet{padding:0;display:block}.prec-sheet.termica{width:auto}.grp + .grp{margin-top:5mm}}</style></head><body>' +
+    html + '<script>Promise.all([document.fonts.ready].concat(Array.from(document.images).map(function(i){return i.complete?0:new Promise(function(r){i.onload=i.onerror=r;});}))).then(function(){setTimeout(function(){window.print();},150);});<\/script></body></html>');
+  w.document.close();
+}
+
+function baixar(nome, texto){
+  var blob = new Blob(['﻿' + texto], { type: 'text/csv;charset=utf-8' });
   var a = document.createElement('a');
-  a.href = state.url; a.download = nomeArquivo();
-  document.body.appendChild(a); a.click(); a.remove();
+  a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function exportarLista(){
+  var linhas = filtrar(S.linhas, filtrosAtuais());
+  var t = ['loja;codigo;ean;produto;classificacao;de;por;variacao_pct;estoque;situacao'].concat(linhas.map(function(r){
+    return [r.loja, r.codigo, r.ean, semPontoVirgula(r.descricao), semPontoVirgula(r.classificacao), precoCsv(r.de), precoCsv(r.por),
+      r.de ? ((r.por - r.de) / r.de * 100).toFixed(1).replace('.', ',') : '', r.estoque, TIPOS[r.tipo][0]].join(';');
+  })).join('\n');
+  baixar('DE_POR_' + (S.loja === 'todas' ? 'TODAS' : 'LOJA' + S.loja) + '_' + dataIso(S.dataHoje) + '.csv', t);
+}
+
+function baixarBase(){
+  if(!S.arquivos.some(function(f){ return !f.erro && f.loja; })) return;
+  var nova = atualizarBase(S.base, S.arquivos);
+  baixar('BASE_PRECOS_' + dataIso(S.dataHoje) + '.csv', baseParaCsv(nova, S.dataHoje));
+  S.base = nova; S.baseData = S.dataHoje;
+  mostrarBase('(atualizada com as planilhas de hoje)');
+  avisar('Base atualizada. Guarde o arquivo na pasta Bases.');
+}
+
+/* ---------- Eventos ---------- */
+function ligarArrastar(zona, input, fn){
+  zona.addEventListener('click', function(){ input.click(); });
+  zona.addEventListener('keydown', function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); } });
+  input.addEventListener('change', function(){ fn(Array.from(input.files)); input.value = ''; });
+  zona.addEventListener('dragover', function(e){ e.preventDefault(); zona.classList.add('drag'); });
+  zona.addEventListener('dragleave', function(){ zona.classList.remove('drag'); });
+  zona.addEventListener('drop', function(e){ e.preventDefault(); zona.classList.remove('drag'); fn(Array.from(e.dataTransfer.files)); });
+}
+ligarArrastar(el('precDropBase'), el('precFileBase'), aoReceberBase);
+ligarArrastar(el('precDropNew'), el('precFileNew'), aoReceberPlanilhas);
+el('precClass').addEventListener('change', function(){ S.classeEscolhida = true; });
+['precTipo', 'precClass', 'precEstoque', 'precMin'].forEach(function(id){
+  el(id).addEventListener('change', function(){ renderResumo(); renderTabela(); });
 });
-el('btnPrecImprimir').addEventListener('click', function(){
-  if(!gerarPrevia()) return;
-  var win = window.open(state.url, '_blank');
-  if(!win) showToast('O navegador bloqueou a nova aba. Use "Baixar PDF" e imprima pelo arquivo.', true);
+el('precBusca').addEventListener('input', renderTabela);
+['precPapel', 'precSize', 'precBarcode'].forEach(function(id){ el(id).addEventListener('change', renderEtiquetas); });
+el('precChkAll').addEventListener('change', function(e){
+  filtrar(S.linhas, filtrosAtuais()).forEach(function(r){ var k = chave(r.loja, r.codigo); if(e.target.checked) S.fora.delete(k); else S.fora.add(k); });
+  renderTabela();
 });
+el('btnPrecCsv').addEventListener('click', exportarLista);
+el('btnPrecBase').addEventListener('click', baixarBase);
+el('btnPrecPrint').addEventListener('click', imprimir);
 
 window.__tool_destroy_precificacao = function(){
-  clearTimeout(state.timer);
-  if(state.url) URL.revokeObjectURL(state.url);
+  estiloEtiqueta.remove();
+  linkFontes.remove();
 };
-
-atualizarResumo();
-carregarLogos();
 
 }; // end of window.__tool_init_precificacao

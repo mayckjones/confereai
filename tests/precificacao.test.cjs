@@ -5,189 +5,145 @@ const vm = require('node:vm');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 
+// Carrega só a parte de regras da ferramenta (antes da INTERFACE), sem tela.
 function loadEngine(){
   const context = vm.createContext({ window: {}, console });
   const source = fs.readFileSync(path.join(root, 'ferramentas/precificacao/precificacao.js'), 'utf8');
   const engine = source.slice(0, source.indexOf('/* ======================== INTERFACE'));
-  vm.runInContext(engine + '\nreturn { LAYOUT, TEMPLATE_HEADERS, TEMPLATE_EXAMPLES, TEMPLATE_INSTRUCTIONS, parseSheetMatrix, parsePrice, formatPrice, gtinValido, analyzeRow, expandLabels, paginate, pageHeightMm, summarize, fitText, textWidth, pdfString, drawLabel, drawPage, buildPdf }; };', context);
+  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar }; };', context);
   return context.window.__tool_init_precificacao();
 }
 module.exports = { loadEngine };
 
-const engine = loadEngine();
-const templateRows = () => engine.parseSheetMatrix([engine.TEMPLATE_HEADERS, ...engine.TEMPLATE_EXAMPLES]).rows;
-const logoStub = { largura: 680, altura: 591, rgb: new Uint8Array([120, 156, 3, 0, 0, 0, 0, 1]), alfa: new Uint8Array([120, 156, 3, 0, 0, 0, 0, 1]) };
+const e = loadEngine();
+const CAB = ['Código', 'Cód. Barras', 'Descrição', 'Fabricante', 'Classificação', 'Grupo de Preço', 'Ctr Preço', 'Ctr Lista', 'ABC', 'Est. Disp.', 'Prc. Venda'];
+const linha = (cod, ean, desc, classe, est, preco) => [cod, ean, desc, 'FAB', classe, 'G', 'C', 'P', 'ZZ', est, preco];
 
-// Coordenadas extraídas de "Etiqueta OFICIAL.pdf" (primeira etiqueta da folha).
-function numbersNear(content, pattern, expected, tolerance = 0.002){
-  const match = content.match(pattern);
-  assert.ok(match, 'não encontrou ' + pattern);
-  match.slice(1).map(Number).forEach((value, i) => assert.ok(Math.abs(value - expected[i]) <= tolerance, `${pattern}: ${value} ≠ ${expected[i]}`));
-}
-
-test('planilha modelo é lida com colunas, códigos e preços', () => {
-  const rows = templateRows();
-  assert.equal(rows.length, 6);
-  assert.deepEqual({ ...rows[0] }, { descricao: 'FRALDA INFANTIL G C/30', codigo: '42118', ean: '7896100542037', de: '59,90', por: '47,90', qtd: '1' });
-  assert.ok(engine.TEMPLATE_EXAMPLES.every(row => engine.gtinValido(row[2])));
-});
-
-test('cabeçalhos com outros nomes, números do Excel e linhas vazias', () => {
-  const { rows, headerRow } = engine.parseSheetMatrix([
-    ['Lista de preços da semana'], [],
-    ['Produto', 'Cód', 'EAN', 'De (R$)', 'Por (R$)', 'Qtd'],
-    ['dipirona 500mg', 10432, 7891058112349, 'R$ 8,99', 5.99, 2],
-    ['', '', '', '', '', ''],
-    ['Sabonete', '', '', '', '3,5', '']
-  ]);
-  assert.equal(headerRow, 3);
-  assert.equal(rows.length, 2);
-  assert.deepEqual({ ...rows[0] }, { descricao: 'dipirona 500mg', codigo: '10432', ean: '7891058112349', de: '8,99', por: '5,99', qtd: '2' });
-  assert.deepEqual({ ...rows[1] }, { descricao: 'Sabonete', codigo: '', ean: '', de: '', por: '3,50', qtd: '' });
-  assert.throws(() => engine.parseSheetMatrix([['Nome', 'Valor unitário'], ['X', 1]]), /DESCRIÇÃO e PREÇO POR/);
-});
-
-test('preços em formato brasileiro', () => {
-  assert.equal(engine.formatPrice(47.9), 'R$47,90');
-  assert.equal(engine.formatPrice(1299.9), 'R$1.299,90');
-  assert.equal(engine.formatPrice(5), 'R$5,00');
-  assert.equal(engine.parsePrice('1.299,90'), 1299.9);
-  assert.equal(engine.parsePrice('R$ 47,9'), 47.9);
-  assert.equal(engine.parsePrice('47.90'), 47.9);
-  assert.equal(engine.parsePrice('1.299'), 1299);
-  assert.equal(engine.parsePrice('abc'), null);
-  assert.equal(engine.parsePrice(''), null);
-});
-
-test('quantidade define quantas etiquetas saem e a última folha encolhe', () => {
-  const rows = [
-    { descricao: 'A', por: '1,00', qtd: '3' },
-    { descricao: 'B', por: '2,00', qtd: '' },
-    { descricao: 'C', por: '3,00', qtd: '0' },
-    { descricao: 'D', por: '', qtd: '5' },
-    { descricao: 'E', por: '5,00', qtd: '4' }
-  ];
-  const labels = engine.expandLabels(rows);
-  assert.deepEqual(labels.map(l => l.descricao).join(''), 'AAABEEEE');
-  assert.deepEqual(Array.from(engine.paginate(labels), p => p.length), [6, 2]);
-  assert.equal(engine.pageHeightMm(6), 297);
-  assert.equal(engine.pageHeightMm(2), 101);
-  assert.equal(engine.pageHeightMm(1), 52);
-  const s = engine.summarize(rows);
-  assert.deepEqual({ etiquetas: s.etiquetas, folhas: s.folhas, ultima: s.ultima, altura: s.alturaUltima, erro: s.comErro, zero: s.semQuantidade }, { etiquetas: 8, folhas: 2, ultima: 2, altura: 101, erro: 1, zero: 1 });
-});
-
-test('validações apontam o que impede ou merece conferência', () => {
-  assert.deepEqual(Array.from(engine.analyzeRow({ descricao: '', por: '' }).erros), ['Falta a descrição', 'Falta o preço Por']);
-  assert.deepEqual(Array.from(engine.analyzeRow({ descricao: 'X', por: 'abc' }).erros), ['Preço Por inválido']);
-  assert.deepEqual(Array.from(engine.analyzeRow({ descricao: 'X', de: 'zz', por: '5' }).erros), ['Preço De inválido']);
-  const semDe = engine.analyzeRow({ descricao: 'álcool 70%', por: '9,90' });
-  assert.equal(semDe.de, null); assert.equal(semDe.imprime, true); assert.equal(semDe.descricao, 'ÁLCOOL 70%');
-  assert.ok(engine.analyzeRow({ descricao: 'X', de: '5,00', por: '5,00' }).avisos.includes('Preço De não é maior que o Por'));
-  assert.ok(engine.analyzeRow({ descricao: 'X', por: '5', ean: '7896100542038' }).avisos.includes('Código de barras inválido'));
-  assert.ok(engine.analyzeRow({ descricao: 'X', por: '5', qtd: '2,5' }).avisos.includes('Quantidade inválida: sai 1 etiqueta'));
-  assert.ok(engine.analyzeRow({ descricao: 'CREME HIDRATANTE CORPORAL PELE EXTRASSECA 400ML', por: '5' }).avisos.some(a => /Descrição longa/.test(a)));
-  assert.ok(engine.analyzeRow({ descricao: 'X ✓', por: '5' }).avisos.includes('Caractere especial sairá como ?'));
-});
-
-test('primeira etiqueta segue as coordenadas do PDF oficial', () => {
-  const labels = engine.expandLabels(templateRows());
-  const page = engine.drawPage(labels, logoStub);
-  const c = page.conteudo;
-  assert.ok(Math.abs(page.altura - 841.8898) < 0.001);
-  numbersNear(c, /([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re S/, [14.17323, 711.4961, 198.4252, 113.3858]);
-  numbersNear(c, /\/F2 7\.5 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(FRALDA INFANTIL G C\/30\)/, [25.51181, 809.2913]);
-  numbersNear(c, /\/F2 7 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(C\\363digo 42118\)/, [25.51181, 797.9528]);
-  numbersNear(c, /\/F1 7 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(C Bar 7896100542037\)/, [25.51181, 788.0315]);
-  numbersNear(c, /\/F1 9 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(De\)/, [25.51181, 771.0236]);
-  numbersNear(c, /\/F2 11 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(R\$59,90\)/, [39.51581, 771.0236]);
-  numbersNear(c, /\.9 w ([\d.]+) ([\d.]+) m ([\d.]+) ([\d.]+) l S/, [38.09849, 774.7087, 82.51313, 774.7087]);
-  numbersNear(c, /\/F2 9 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(Por\)/, [25.51181, 756.8504]);
-  numbersNear(c, /\/F2 28 Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(R\$47,90\)/, [25.51181, 725.6693]);
-  numbersNear(c, /q ([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm \/Logo Do Q/, [59.52756, 51.73645, 143.1496, 745.1554]);
-  numbersNear(c, /\[2 2\] 0 d 0\.6 0\.6 0\.6 RG 0\.5 w ([\d.]+) ([\d.]+) m ([\d.]+) ([\d.]+) l S/, [5.669291, 698.7402, 221.1024, 698.7402]);
-  // Sexta etiqueta: caixa a 6 mm da borda inferior e sem linha de corte depois dela.
-  numbersNear(c.slice(c.lastIndexOf(' re S') - 60), /([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re S/, [14.17323, 17.00787, 198.4252, 113.3858]);
-  assert.equal((c.match(/\[2 2\] 0 d/g) || []).length, 5);
-});
-
-test('sem preço De a etiqueta mostra só o preço', () => {
-  const [label] = engine.expandLabels([{ descricao: 'Soro fisiológico 500ml', codigo: '7788', por: '6,49' }]);
-  const page = engine.drawPage([label], null);
-  assert.ok(Math.abs(page.altura - 52 * 72 / 25.4) < 0.001);
-  assert.doesNotMatch(page.conteudo, /\(De\)|\(Por\)|C Bar|\/Logo/);
-  assert.match(page.conteudo, /\(SORO FISIOL\\323GICO 500ML\)/);
-  assert.match(page.conteudo, /\/F2 28 Tf .* \(R\$6,49\) Tj/);
-});
-
-test('textos especiais são codificados em WinAnsi e textos longos cabem na etiqueta', () => {
-  assert.equal(engine.pdfString('PÃO (ÇA) \\'), '(P\\303O \\(\\307A\\) \\\\)');
-  assert.equal(engine.pdfString('OK ✓ – fim…'), '(OK ? \\226 fim\\205)');
-  const max = engine.LAYOUT.larguraUtil * 72 / 25.4;
-  const reduzido = engine.fitText('SHAMPOO ANTICASPA MENTOL REFRESCANTE 400ML', true, 7.5, 5.5, max);
-  assert.equal(reduzido.cortado, false); assert.ok(reduzido.tamanho < 7.5);
-  assert.ok(engine.textWidth(reduzido.texto, true, reduzido.tamanho) <= max);
-  const cortado = engine.fitText('CREME HIDRATANTE CORPORAL PARA PELE EXTRASSECA COM UREIA 10% E VITAMINA E 400ML', true, 7.5, 5.5, max);
-  assert.equal(cortado.cortado, true); assert.equal(cortado.tamanho, 5.5); assert.match(cortado.texto, /…$/);
-  assert.ok(engine.textWidth(cortado.texto, true, 5.5) <= max);
-  assert.ok(Math.abs(engine.textWidth('R$59,90', true, 11) - 41.58) < 0.001);
-  // Preço de quatro dígitos diminui para não encostar no logo; até R$ 999,99 mantém 28 pt.
-  const [caro, comum] = engine.expandLabels([{ descricao: 'A', por: '1.149,90' }, { descricao: 'B', por: '999,99' }]);
-  const tamanho = label => Number(engine.drawLabel(label, 800, null).match(/\/F2 ([\d.]+) Tf [^\n]*\(R\$[\d.,]+\) Tj ET$/)[1]);
-  assert.ok(tamanho(caro) < 28);
-  assert.ok(engine.textWidth('R$1.149,90', true, tamanho(caro)) <= engine.LAYOUT.larguraPreco * 72 / 25.4);
-  assert.equal(tamanho(comum), 28);
-});
-
-// Leitor mínimo de .xlsx (zip + XML) só para conferir a planilha modelo.
-function readZipEntry(file, entryName){
-  const buf = fs.readFileSync(file), eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
-  let p = buf.readUInt32LE(eocd + 16);
-  for(let i = 0; i < buf.readUInt16LE(eocd + 10); i++){
-    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20), nameLen = buf.readUInt16LE(p + 28), local = buf.readUInt32LE(p + 42);
-    if(buf.toString('utf8', p + 46, p + 46 + nameLen) === entryName){
-      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28), data = buf.subarray(start, start + size);
-      return (method === 8 ? require('node:zlib').inflateRawSync(data) : data).toString('utf8');
+// Base com duas lojas e 60 produtos cada, estoques diferentes por loja (para a detecção funcionar).
+function baseExemplo(){
+  const recs = [];
+  for(const loja of [1, 7]){
+    for(let i = 1; i <= 60; i++){
+      recs.push({ loja, codigo: String(i), ean: '78900000' + String(i).padStart(5, '0'), descricao: 'PRODUTO ' + i, classificacao: i % 2 ? 'PERFUMARIA' : 'GENERICO', estoque: loja === 1 ? i : 100 + i, venda: 10 + i });
     }
-    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
   }
-  throw new Error('não encontrou ' + entryName);
+  return e.paraMapa(recs);
 }
-function sheetMatrix(xml){
-  const matrix = [], unescape = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-  for(const m of xml.matchAll(/<c r="([A-Z])(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/c>)/g)){
-    const inner = m[3] || '', v = (inner.match(/<v>([^<]*)<\/v>/) || [])[1];
-    const row = (matrix[Number(m[2]) - 1] = matrix[Number(m[2]) - 1] || []);
-    row[m[1].charCodeAt(0) - 65] = v !== undefined ? Number(v) : unescape([...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t => t[1]).join(''));
-  }
-  return Array.from(matrix, row => Array.from(row || [], c => c === undefined ? '' : c));
+function planilhaDaLoja(base, loja, mudar = {}){
+  const linhas = [CAB];
+  base.forEach(r => { if(r.loja === loja) linhas.push(linha(r.codigo, r.ean, r.descricao, r.classificacao, r.estoque, mudar[r.codigo] ?? r.venda)); });
+  return linhas;
 }
 
-test('planilha modelo para baixar tem as colunas e os exemplos que a ferramenta lê', () => {
-  const file = path.join(root, 'ferramentas/precificacao/modelo_etiquetas_preco.xlsx');
-  const matrix = sheetMatrix(readZipEntry(file, 'xl/worksheets/sheet1.xml'));
-  assert.deepEqual(matrix[0], Array.from(engine.TEMPLATE_HEADERS));
-  const { rows } = engine.parseSheetMatrix(matrix);
-  assert.equal(rows.length, engine.TEMPLATE_EXAMPLES.length);
-  assert.deepEqual({ ...rows[0] }, { descricao: 'FRALDA INFANTIL G C/30', codigo: '42118', ean: '7896100542037', de: '59,90', por: '47,90', qtd: '1' });
-  assert.match(readZipEntry(file, 'xl/workbook.xml'), /<sheet name="Etiquetas"[\s\S]*<sheet name="Como preencher"/);
-  assert.match(readZipEntry(file, 'xl/worksheets/sheet2.xml'), /QUANTIDADE:/);
+test('números no formato do Infarma e do Excel', () => {
+  assert.equal(e.brNum('22.99'), 22.99);
+  assert.equal(e.brNum('7,49'), 7.49);
+  assert.equal(e.brNum('1.299,90'), 1299.9);
+  assert.equal(e.brNum(12), 12);
+  assert.ok(Number.isNaN(e.brNum('abc')));
 });
 
-test('PDF gerado tem estrutura válida, uma folha por 6 etiquetas e logo único', () => {
-  const rows = templateRows().map((row, i) => ({ ...row, qtd: i === 0 ? '3' : '1' }));
-  const bytes = engine.buildPdf(engine.expandLabels(rows), logoStub, { data: new Date(2026, 10, 5, 20, 0, 0) });
-  const pdf = Buffer.from(bytes).toString('latin1');
-  assert.match(pdf, /^%PDF-1\.4\n/);
-  assert.match(pdf, /%%EOF\n$/);
-  assert.equal((pdf.match(/\/Type \/Page /g) || []).length, 2);
-  const heights = [...pdf.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)].map(m => [Number(m[1]), Number(m[2])]);
-  assert.deepEqual(heights.map(h => h.map(v => Math.round(v * 100) / 100)), [[226.77, 841.89], [226.77, 286.3]]);
-  assert.equal((pdf.match(/\/Subtype \/Image/g) || []).length, 2);
-  assert.equal((pdf.match(/\/Logo Do/g) || []).length, 8);
-  const startxref = Number(pdf.match(/startxref\n(\d+)/)[1]);
-  assert.equal(pdf.slice(startxref, startxref + 4), 'xref');
-  const entries = pdf.slice(startxref).split('\n').slice(3).filter(line => / 00000 n $/.test(line));
-  entries.forEach((line, i) => assert.equal(pdf.slice(Number(line.slice(0, 10)), Number(line.slice(0, 10)) + String(i + 1).length + 6), (i + 1) + ' 0 obj'));
-  assert.match(pdf, /\/CreationDate \(D:20261105200000\)/);
+test('planilha de Produtos é lida pelas colunas do Infarma', () => {
+  const recs = e.lerPlanilhaMatriz([
+    CAB,
+    linha('26069', '7899547544541', '*ANLODIPINO 5 30CP PRA', 'ESPECIAIS', 1, 7.99),
+    linha('22855', 300651481198, 'SYSTANE 10ML', 'PERFUMARIA', '3', '106,21'),
+    linha('', '', '', '', '', '')
+  ]);
+  assert.equal(recs.length, 2);
+  assert.deepEqual({ ...recs[0] }, { codigo: '26069', ean: '7899547544541', descricao: '*ANLODIPINO 5 30CP PRA', classificacao: 'ESPECIAIS', estoque: 1, venda: 7.99 });
+  assert.equal(recs[1].ean, '300651481198');
+  assert.equal(recs[1].venda, 106.21);
+  assert.throws(() => e.lerPlanilhaMatriz([['Nome', 'Valor']]), /Código.*Prc\. Venda/);
+});
+
+test('base salva e lida de novo sem perder nada (EAN com zero à esquerda incluso)', () => {
+  const base = e.paraMapa([
+    { loja: 1, codigo: '40', ean: '07896007551019', descricao: 'ABS; INTIMUS', classificacao: 'PERFUMARIA', estoque: 3, venda: 5.99 },
+    { loja: 7, codigo: '300', ean: '7891024132128', descricao: 'CRM DENT', classificacao: 'PERFUMARIA', estoque: 0, venda: 8.99 }
+  ]);
+  const csv = e.baseParaCsv(base, '10/11/2026');
+  assert.equal(csv.split('\n')[0], e.BASE_COLUNAS.join(';'));
+  const lida = e.lerBaseCsv('﻿' + csv);
+  assert.equal(lida.data, '10/11/2026');
+  assert.equal(lida.recs.length, 2);
+  assert.equal(lida.recs[0].ean, '07896007551019');
+  assert.equal(lida.recs[0].descricao, 'ABS, INTIMUS');
+  assert.equal(lida.recs[1].venda, 8.99);
+  assert.throws(() => e.lerBaseCsv('loja;codigo;descricao;venda\n1;7891;X;9,99'), /colunas loja, codigo, ean e venda/);
+});
+
+test('detecta a loja pelo estoque, mesmo com o nome do arquivo errado', () => {
+  const base = baseExemplo();
+  const recs = e.lerPlanilhaMatriz(planilhaDaLoja(base, 7));
+  const det = e.detectarLoja(recs, base);
+  assert.equal(det.loja, 7);
+  assert.equal(det.p, 1);
+  assert.equal(e.lojaPeloNome('loja 4.xls'), 4);
+  assert.equal(e.lojaPeloNome('LOJA07.xls'), 7);
+  assert.equal(e.lojaPeloNome('produtos.xls'), null);
+  assert.equal(e.detectarLoja(recs.slice(0, 10), base), null, 'poucos produtos não bastam para detectar');
+});
+
+test('conciliação separa baixou, subiu, novo e igual por loja', () => {
+  const base = baseExemplo();
+  const matriz = planilhaDaLoja(base, 1, { 1: 9.5, 2: 15 });
+  matriz.push(linha('999', '7891000000999', 'NOVO PRODUTO', 'PERFUMARIA', 2, 4.99));
+  const recs = e.lerPlanilhaMatriz(matriz);
+  const { linhas, avisos } = e.conciliar([{ nome: 'loja 1.xls', loja: 1, recs }], base);
+  const c = e.contar(linhas);
+  assert.deepEqual({ ...c }, { down: 1, up: 1, new: 1, eq: 58 });
+  const baixou = linhas.find(r => r.tipo === 'down');
+  assert.equal(baixou.codigo, '1'); assert.equal(baixou.de, 11); assert.equal(baixou.por, 9.5);
+  assert.equal(linhas.find(r => r.tipo === 'new').de, null);
+  assert.match(avisos.join(' '), /Sem planilha hoje para: LOJA 7 MEG 4/);
+});
+
+test('arquivo sem loja fica de fora e dois arquivos na mesma loja geram aviso', () => {
+  const base = baseExemplo();
+  const recs = e.lerPlanilhaMatriz(planilhaDaLoja(base, 1));
+  const r1 = e.conciliar([{ nome: 'x.xls', loja: null, recs }], base);
+  assert.equal(r1.linhas.length, 0);
+  assert.match(r1.avisos[0], /Escolha a loja do arquivo/);
+  const r2 = e.conciliar([{ nome: 'a.xls', loja: 1, recs }, { nome: 'b.xls', loja: 1, recs }], base);
+  assert.match(r2.avisos.join(' '), /Dois arquivos foram marcados como/);
+});
+
+test('filtros: tipo, classificação, estoque, preço mínimo, busca e loja', () => {
+  const base = baseExemplo();
+  const recs = e.lerPlanilhaMatriz(planilhaDaLoja(base, 1, { 1: 9.5, 2: 15, 3: 0.5 }));
+  const { linhas } = e.conciliar([{ nome: 'l1', loja: 1, recs }, { nome: 'l7', loja: 7, recs: e.lerPlanilhaMatriz(planilhaDaLoja(base, 7)) }], base);
+  const f = (o) => e.filtrar(linhas, { loja: 'todas', tipo: 'changed', classe: '', soEstoque: true, minimo: 1, busca: '', ...o });
+  assert.equal(f().length, 2, 'o preço de 0,50 é ignorado pelo mínimo de R$ 1');
+  assert.equal(f({ minimo: 0 }).length, 3);
+  assert.equal(f({ classe: 'PERFUMARIA' }).length, 1);
+  assert.equal(f({ tipo: 'down' })[0].codigo, '1');
+  assert.equal(f({ tipo: 'all', loja: 7 }).length, 60);
+  assert.equal(f({ tipo: 'all', busca: 'produto 12' }).length, 2);
+});
+
+test('base atualizada guarda o preço de hoje e zera o estoque do que sumiu', () => {
+  const base = baseExemplo();
+  const matriz = planilhaDaLoja(base, 1, { 1: 9.5 }).filter(r => r[0] !== '60');
+  const recs = e.lerPlanilhaMatriz(matriz);
+  const nova = e.atualizarBase(base, [{ nome: 'l1', loja: 1, recs }]);
+  assert.equal(nova.get(e.chave(1, '1')).venda, 9.5);
+  assert.equal(nova.get(e.chave(1, '60')).estoque, 0);
+  assert.equal(nova.get(e.chave(1, '60')).venda, 70, 'mantém o último preço conhecido');
+  assert.equal(nova.get(e.chave(7, '1')).venda, 11, 'outras lojas não mudam');
+  assert.equal(base.get(e.chave(1, '1')).venda, 11, 'a base original não é alterada');
+  const amanha = e.conciliar([{ nome: 'l1', loja: 1, recs }], nova);
+  assert.equal(e.contar(amanha.linhas).down, 0, 'no dia seguinte a mesma alteração não aparece de novo');
+});
+
+test('etiqueta: nome limpo, código de barras e datas', () => {
+  assert.equal(e.nomeEtiqueta('*OMEPRAZOL 20 56CP CIM ( P )'), 'OMEPRAZOL 20 56CP CIM');
+  assert.ok(e.eanValido('7896007540600'));
+  assert.ok(!e.eanValido('7896007540601'));
+  assert.equal(e.codigoBarras('07896007551019'), '7896007551019');
+  assert.equal(e.codigoBarras('0000000001555'), '');
+  assert.equal(e.codigoBarras('123'), '');
+  assert.equal(e.dataIso('10/11/2026'), '2026-11-10');
+  assert.equal(e.dataHoje(new Date(2026, 10, 9)), '09/11/2026');
+  assert.equal(e.LOJA_NOMES[7], 'LOJA 7 MEG 4');
 });
