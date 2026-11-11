@@ -10,7 +10,7 @@ function loadEngine(){
   const context = vm.createContext({ window: {}, console });
   const source = fs.readFileSync(path.join(root, 'ferramentas/precificacao/precificacao.js'), 'utf8');
   const engine = source.slice(0, source.indexOf('/* ======================== INTERFACE'));
-  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar }; };', context);
+  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar, criarEtiquetaManual }; };', context);
   return context.window.__tool_init_precificacao();
 }
 module.exports = { loadEngine };
@@ -146,4 +146,26 @@ test('etiqueta: nome limpo, código de barras e datas', () => {
   assert.equal(e.dataIso('10/11/2026'), '2026-11-10');
   assert.equal(e.dataHoje(new Date(2026, 10, 9)), '09/11/2026');
   assert.equal(e.LOJA_NOMES[7], 'LOJA 7 MEG 4');
+});
+
+test('etiqueta manual: valida os campos e só aceita preço anterior maior que o atual', () => {
+  const ok = e.criarEtiquetaManual({ codigo: ' 24638 ', descricao: 'cetoconazol shp 100ml', ean: '7897-848500969', por: '19,99', de: 'R$ 27,99', loja: '6', quantidade: '3' });
+  assert.equal(ok.erro, undefined);
+  assert.equal(ok.etiqueta.descricao, 'CETOCONAZOL SHP 100ML');
+  assert.equal(ok.etiqueta.codigo, '24638');
+  assert.equal(ok.etiqueta.ean, '7897848500969');
+  assert.equal(ok.etiqueta.de, 27.99);
+  assert.equal(ok.etiqueta.por, 19.99);
+  assert.equal(ok.etiqueta.tipo, 'down');
+  assert.equal(ok.etiqueta.loja, 6);
+  assert.equal(ok.etiqueta.quantidade, 3);
+  const simples = e.criarEtiquetaManual({ descricao: 'Shampoo', por: '12.5', de: '' });
+  assert.equal(simples.etiqueta.tipo, 'eq');
+  assert.equal(simples.etiqueta.de, null);
+  assert.equal(simples.etiqueta.quantidade, 1);
+  assert.match(e.criarEtiquetaManual({ descricao: '', por: '10' }).erro, /descrição/);
+  assert.match(e.criarEtiquetaManual({ descricao: 'X', por: '0' }).erro, /preço/);
+  assert.match(e.criarEtiquetaManual({ descricao: 'X', por: '10', de: '9,99' }).erro, /maior que o preço atual/);
+  assert.match(e.criarEtiquetaManual({ descricao: 'X', por: '10', de: 'abc' }).erro, /não é um valor válido/);
+  assert.equal(e.criarEtiquetaManual({ descricao: 'X', por: '10', quantidade: 999 }).etiqueta.quantidade, 200);
 });

@@ -96,6 +96,36 @@
 .tool-precificacao .p-new{ background:var(--sky-bg); color:var(--blue-500); }
 .tool-precificacao .p-eq{ background:var(--gray-100); color:var(--gray-500); }
 
+/* ---------- ETIQUETA MANUAL ---------- */
+.tool-precificacao .prec-manual{
+  display:grid; grid-template-columns:repeat(12, minmax(0, 1fr)); gap:10px 12px; align-items:end;
+  padding:16px 18px; border-radius:var(--radius); border:1px solid var(--gray-100); background:var(--card-bg); box-shadow:var(--shadow); font-size:13px;
+}
+.tool-precificacao .prec-manual label{ display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--gray-700); min-width:0; }
+.tool-precificacao .prec-manual input,
+.tool-precificacao .prec-manual select{ width:100%; }
+.tool-precificacao .prec-manual .pm-cod{ grid-column:span 2; }
+.tool-precificacao .prec-manual .pm-desc{ grid-column:span 6; }
+.tool-precificacao .prec-manual .pm-ean{ grid-column:span 4; }
+.tool-precificacao .prec-manual .pm-preco{ grid-column:span 2; }
+.tool-precificacao .prec-manual .pm-loja{ grid-column:span 3; }
+.tool-precificacao .prec-manual .pm-qtd{ grid-column:span 1; }
+.tool-precificacao .prec-manual .pm-actions{ grid-column:span 4; display:flex; justify-content:flex-end; }
+.tool-precificacao .prec-manual .pm-hint{ grid-column:1 / -1; margin:0; font-size:12px; line-height:1.5; color:var(--gray-500); }
+.tool-precificacao .pm-list{ grid-column:1 / -1; display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--gray-100); padding-top:10px; }
+.tool-precificacao .pm-list-head{ display:flex; justify-content:space-between; align-items:center; }
+.tool-precificacao .pm-clear{ border:0; background:none; color:var(--red); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+.tool-precificacao .pm-item{ display:flex; flex-wrap:wrap; gap:4px 14px; align-items:center; padding:6px 10px; border:1px solid var(--gray-100); border-radius:9px; font-size:12.5px; }
+.tool-precificacao .pm-item .pm-item-nome{ font-weight:700; flex:1; min-width:180px; }
+.tool-precificacao .pm-item .muted{ color:var(--gray-500); }
+.tool-precificacao .pm-item s{ color:var(--gray-500); }
+.tool-precificacao .pm-item .x{ border:0; background:none; color:var(--gray-400); font-size:18px; line-height:1; cursor:pointer; border-radius:6px; width:26px; height:26px; }
+.tool-precificacao .pm-item .x:hover{ background:var(--red-bg); color:var(--red); }
+@media (max-width: 760px){
+  .tool-precificacao .prec-manual > label,
+  .tool-precificacao .prec-manual .pm-actions{ grid-column:1 / -1; }
+}
+
 /* ---------- PASSO 3: ETIQUETAS ---------- */
 .tool-precificacao .section-head:has(.prec-print-opts){ align-items:center; flex-wrap:wrap; gap:10px; }
 .tool-precificacao .prec-print-opts{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; font-size:13px; color:var(--gray-700); }

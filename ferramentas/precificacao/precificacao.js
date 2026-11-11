@@ -190,6 +190,26 @@ function filtrar(linhas, f){
   });
 }
 
+// Etiqueta digitada à mão. Devolve { etiqueta } ou { erro }. O preço anterior só vale se for maior que o atual.
+function criarEtiquetaManual(d){
+  var desc = String(d.descricao || '').trim();
+  var por = brNum(String(d.por == null ? '' : d.por).replace(/^R\$\s*/, ''));
+  var deTexto = String(d.de == null ? '' : d.de).replace(/^R\$\s*/, '').trim();
+  var de = deTexto ? brNum(deTexto) : null;
+  if(!desc) return { erro: 'Preencha a descrição.' };
+  if(isNaN(por) || por <= 0) return { erro: 'Preencha o preço com um valor maior que zero (ex.: 19,99).' };
+  if(de != null && (isNaN(de) || de <= 0)) return { erro: 'O preço anterior não é um valor válido.' };
+  if(de != null && Math.round(de * 100) <= Math.round(por * 100)) return { erro: 'O preço anterior precisa ser maior que o preço atual. Se não baixou, deixe em branco.' };
+  var qtd = Math.max(1, Math.min(200, parseInt(d.quantidade, 10) || 1));
+  por = Math.round(por * 100) / 100;
+  if(de != null) de = Math.round(de * 100) / 100;
+  return { etiqueta: {
+    manual: true, loja: Number(d.loja) || null, codigo: String(d.codigo || '').trim(), ean: String(d.ean || '').replace(/\D/g, ''),
+    descricao: desc.toUpperCase(), classificacao: '', estoque: qtd, quantidade: qtd,
+    de: de, por: por, tipo: de != null ? 'down' : 'eq'
+  } };
+}
+
 function contar(linhas){
   var c = { down: 0, up: 0, new: 0, eq: 0 };
   linhas.forEach(function(r){ c[r.tipo]++; });
@@ -244,7 +264,7 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c
 function brl(v){ return v == null || isNaN(v) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function avisar(msg, erro){ if(typeof showToast === 'function') showToast(msg, erro); }
 
-var S = { base: null, baseData: '', arquivos: [], linhas: [], loja: 'todas', fora: new Set(), dataHoje: dataHoje(), classeEscolhida: false };
+var S = { base: null, baseData: '', arquivos: [], linhas: [], loja: 'todas', fora: new Set(), dataHoje: dataHoje(), classeEscolhida: false, manuais: [] };
 
 /* ---------- Recursos externos (fonte da etiqueta e código de barras) ---------- */
 var estiloEtiqueta = document.createElement('style');
@@ -372,7 +392,7 @@ function recalcular(){
   }).join('');
   el('precResults').hidden = !S.linhas.length;
   el('precHow').hidden = !!S.linhas.length;
-  if(S.linhas.length){ renderResumo(); renderTabela(); }
+  if(S.linhas.length){ renderResumo(); renderTabela(); } else { renderEtiquetas(); }
 }
 
 function renderResumo(){
@@ -428,7 +448,7 @@ function htmlEtiqueta(r, i, comBarras){
       '<div class="por"><span class="rs">' + (promo ? 'Por R$' : 'R$') + '</span><span class="val">' + Number(partes[0]).toLocaleString('pt-BR') + '</span><span class="cents">,' + partes[1] + '</span></div></div>' +
       (promo ? '<div class="tr"><span class="tag">Oferta</span>' + (off >= 1 ? '<div class="off">-' + off + '%</div>' : '') + '</div>' : '') + '</div>' +
     '<div class="foot"><div class="bcw">' + (barras ? '<svg data-code="' + esc(barras) + '"></svg>' : '') + '</div>' +
-      '<div class="meta"><span class="cod">Cód. ' + esc(r.codigo) + '</span><br>' + esc(r.ean || '') + '</div></div></div>';
+      '<div class="meta">' + (r.codigo ? '<span class="cod">Cód. ' + esc(r.codigo) + '</span><br>' : '') + esc(r.ean || '') + '</div></div></div>';
 }
 
 function renderEtiquetas(){
@@ -439,16 +459,29 @@ function renderEtiquetas(){
   sheet.style.setProperty('--lw', md.lw + 'mm');
   sheet.style.setProperty('--lh', md.lh + 'mm');
   sheet.style.setProperty('--s', md.escala);
-  el('precLblCount').textContent = linhas.length.toLocaleString('pt-BR');
-  var lista = linhas.slice(0, 1500).sort(function(a, b){ return a.loja - b.loja || a.descricao.localeCompare(b.descricao); });
+  var quais = el('precQuais').value;
+  if(quais === 'manuais') linhas = [];
   var grupos = [];
+  if(quais !== 'lista'){
+    var manuais = S.manuais.slice().sort(function(a, b){ return (a.loja || 0) - (b.loja || 0); });
+    manuais.forEach(function(r, i){
+      var titulo = 'ETIQUETAS MANUAIS · ' + (r.loja ? nomeLoja(r.loja) : 'SEM LOJA');
+      var g = grupos[grupos.length - 1];
+      if(!g || g.titulo !== titulo){ g = { titulo: titulo, html: [] }; grupos.push(g); }
+      for(var q = 0; q < r.quantidade; q++) g.html.push(htmlEtiqueta(r, 'm' + i + '_' + q, comBarras));
+    });
+  }
+  var lista = linhas.slice(0, 1500).sort(function(a, b){ return a.loja - b.loja || a.descricao.localeCompare(b.descricao); });
   lista.forEach(function(r, i){
     var g = grupos[grupos.length - 1];
-    if(!g || g.loja !== r.loja){ g = { loja: r.loja, html: [] }; grupos.push(g); }
+    if(!g || g.loja !== r.loja){ g = { loja: r.loja, titulo: nomeLoja(r.loja), html: [] }; grupos.push(g); }
     g.html.push(htmlEtiqueta(r, i, comBarras));
   });
+  var total = grupos.reduce(function(t, g){ return t + g.html.length; }, 0);
+  el('precLblCount').textContent = total.toLocaleString('pt-BR');
+  el('precEtiquetas').hidden = !S.linhas.length && !S.manuais.length;
   sheet.innerHTML = grupos.length ? grupos.map(function(g){
-    return '<section class="grp"><h3 class="grp-h">' + esc(nomeLoja(g.loja)) + '<span>' + g.html.length + ' etiqueta' + (g.html.length > 1 ? 's' : '') + '</span></h3>' +
+    return '<section class="grp"><h3 class="grp-h">' + esc(g.titulo) + '<span>' + g.html.length + ' etiqueta' + (g.html.length > 1 ? 's' : '') + '</span></h3>' +
       '<div class="grid" style="grid-template-columns:repeat(auto-fill,' + md.lw + 'mm)">' + g.html.join('') + '</div></section>';
   }).join('') : '<div class="empty">Nenhuma etiqueta selecionada.</div>';
   if(comBarras && window.JsBarcode){
@@ -522,6 +555,64 @@ function baixarBase(){
   avisar('Base atualizada. Guarde o arquivo na pasta Bases.');
 }
 
+/* ---------- Etiqueta manual ---------- */
+function procurarProduto(codigo, loja){
+  codigo = String(codigo || '').trim();
+  if(!codigo) return null;
+  var achado = null;
+  S.linhas.forEach(function(r){ if(!achado && String(r.codigo) === codigo && r.loja === loja) achado = r; });
+  S.linhas.forEach(function(r){ if(!achado && String(r.codigo) === codigo) achado = r; });
+  if(!achado && S.base){
+    achado = S.base.get(chave(loja, codigo)) || null;
+    if(!achado) S.base.forEach(function(r){ if(!achado && String(r.codigo) === codigo) achado = r; });
+  }
+  return achado;
+}
+
+function preencherPeloCodigo(){
+  var r = procurarProduto(el('pmCodigo').value, Number(el('pmLoja').value));
+  var dica = el('pmHint');
+  if(!el('pmCodigo').value.trim()) return;
+  if(!r){ dica.textContent = 'Código não encontrado nas planilhas carregadas. Preencha os campos à mão.'; return; }
+  el('pmDesc').value = r.descricao || '';
+  el('pmEan').value = r.ean || '';
+  var preco = r.por != null ? r.por : r.venda;
+  if(preco != null) el('pmPor').value = preco.toFixed(2).replace('.', ',');
+  el('pmDe').value = r.tipo === 'down' && r.de != null ? r.de.toFixed(2).replace('.', ',') : '';
+  dica.textContent = 'Preenchido a partir ' + (S.linhas.length ? 'das planilhas de hoje' : 'da base') + '. Confira antes de adicionar.';
+}
+
+function renderManuais(){
+  var box = el('pmList');
+  box.hidden = !S.manuais.length;
+  box.innerHTML = S.manuais.length ? '<div class="pm-list-head"><b>' + S.manuais.length + ' etiqueta' + (S.manuais.length > 1 ? 's' : '') + ' manual' + (S.manuais.length > 1 ? 'is' : '') + '</b>' +
+    '<button type="button" class="pm-clear" id="pmLimpar">Limpar todas</button></div>' +
+    S.manuais.map(function(r, i){
+      return '<div class="pm-item"><span class="pm-item-nome">' + esc(r.descricao) + '</span><span>' + (r.de != null ? '<s>R$ ' + brl(r.de) + '</s> ' : '') + '<b>R$ ' + brl(r.por) + '</b></span>' +
+        '<span class="muted">' + esc(r.loja ? nomeLoja(r.loja) : '') + ' · ' + r.quantidade + 'x</span><button type="button" class="x" data-pm="' + i + '" aria-label="Remover">×</button></div>';
+    }).join('') : '';
+  box.querySelectorAll('button[data-pm]').forEach(function(b){
+    b.onclick = function(){ S.manuais.splice(Number(b.dataset.pm), 1); renderManuais(); renderEtiquetas(); };
+  });
+  var limpar = el('pmLimpar');
+  if(limpar) limpar.onclick = function(){ S.manuais = []; renderManuais(); renderEtiquetas(); };
+}
+
+function adicionarManual(e){
+  e.preventDefault();
+  var r = criarEtiquetaManual({
+    codigo: el('pmCodigo').value, descricao: el('pmDesc').value, ean: el('pmEan').value,
+    por: el('pmPor').value, de: el('pmDe').value, loja: el('pmLoja').value, quantidade: el('pmQtd').value
+  });
+  if(r.erro){ avisar(r.erro, true); el('pmHint').textContent = r.erro; return; }
+  S.manuais.push(r.etiqueta);
+  ['pmCodigo', 'pmDesc', 'pmEan', 'pmPor', 'pmDe'].forEach(function(id){ el(id).value = ''; });
+  el('pmQtd').value = 1;
+  el('pmHint').textContent = 'Etiqueta adicionada. Ela aparece no início da folha de etiquetas.';
+  el('pmCodigo').focus();
+  renderManuais(); renderEtiquetas();
+}
+
 /* ---------- Eventos ---------- */
 function ligarArrastar(zona, input, fn){
   zona.addEventListener('click', function(){ input.click(); });
@@ -538,7 +629,10 @@ el('precClass').addEventListener('change', function(){ S.classeEscolhida = true;
   el(id).addEventListener('change', function(){ renderResumo(); renderTabela(); });
 });
 el('precBusca').addEventListener('input', renderTabela);
-['precPapel', 'precSize', 'precBarcode'].forEach(function(id){ el(id).addEventListener('change', renderEtiquetas); });
+['precPapel', 'precSize', 'precBarcode', 'precQuais'].forEach(function(id){ el(id).addEventListener('change', renderEtiquetas); });
+el('precManualForm').addEventListener('submit', adicionarManual);
+el('pmCodigo').addEventListener('change', preencherPeloCodigo);
+el('pmLoja').addEventListener('change', function(){ if(el('pmCodigo').value.trim()) preencherPeloCodigo(); });
 el('precChkAll').addEventListener('change', function(e){
   filtrar(S.linhas, filtrosAtuais()).forEach(function(r){ var k = chave(r.loja, r.codigo); if(e.target.checked) S.fora.delete(k); else S.fora.add(k); });
   renderTabela();

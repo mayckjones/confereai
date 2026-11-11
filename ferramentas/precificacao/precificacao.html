@@ -89,9 +89,38 @@
         </table>
       </div>
     </div>
+  </div>
 
+  <div class="section-head">
+    <h2>Etiqueta manual</h2>
+    <span class="sub">Para um produto avulso, sem depender das planilhas</span>
+  </div>
+
+  <form class="prec-manual" id="precManualForm" autocomplete="off">
+    <label class="pm-cod">Código interno <input type="text" id="pmCodigo" inputmode="numeric" placeholder="ex.: 24638"></label>
+    <label class="pm-desc">Descrição <input type="text" id="pmDesc" placeholder="Nome que vai na etiqueta" required></label>
+    <label class="pm-ean">Código de barras (EAN) <input type="text" id="pmEan" inputmode="numeric" placeholder="opcional"></label>
+    <label class="pm-preco">Preço R$ <input type="text" id="pmPor" inputmode="decimal" placeholder="0,00" required></label>
+    <label class="pm-preco">Preço anterior R$ <input type="text" id="pmDe" inputmode="decimal" placeholder="só se baixou"></label>
+    <label class="pm-loja">Loja
+      <select id="pmLoja">
+        <option value="1">LOJA 1 JIE</option>
+        <option value="2">LOJA 2 MEG 1</option>
+        <option value="3">LOJA 3 L E</option>
+        <option value="6">LOJA 6 MEG 5</option>
+        <option value="7">LOJA 7 MEG 4</option>
+      </select></label>
+    <label class="pm-qtd">Qtd. <input type="number" id="pmQtd" value="1" min="1" max="200"></label>
+    <div class="pm-actions">
+      <button class="btn btn-primary prec-btn-sm" type="submit">Adicionar etiqueta</button>
+    </div>
+    <p class="pm-hint" id="pmHint">Digite o código interno para preencher sozinho a partir das planilhas carregadas. Preencha o preço anterior só quando o produto realmente custava isso antes; com ele, a etiqueta sai como OFERTA (De/Por).</p>
+    <div class="pm-list" id="pmList" hidden></div>
+  </form>
+
+  <div id="precEtiquetas" hidden>
     <div class="section-head">
-      <h2>3. Etiquetas · <span id="precLblCount">0</span></h2>
+      <h2>Etiquetas · <span id="precLblCount">0</span></h2>
       <div class="prec-print-opts">
         <label>Papel
           <select id="precPapel">
@@ -103,6 +132,12 @@
             <option value="63.5x32">Média · 63,5 × 32 mm (3 por linha, 24 por folha)</option>
             <option value="47x30">Pequena · 47 × 30 mm (4 por linha, 36 por folha)</option>
             <option value="95x32">Grande · 95 × 32 mm (2 por linha, 16 por folha)</option>
+          </select></label>
+        <label>Imprimir
+          <select id="precQuais">
+            <option value="tudo">Lista + manuais</option>
+            <option value="lista">Só da lista</option>
+            <option value="manuais">Só as manuais</option>
           </select></label>
         <label class="prec-check"><input type="checkbox" id="precBarcode" checked> Código de barras</label>
         <button class="btn btn-primary" id="btnPrecPrint" type="button">Imprimir etiquetas</button>
