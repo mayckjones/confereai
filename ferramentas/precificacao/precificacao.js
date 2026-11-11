@@ -467,14 +467,33 @@ function imprimir(){
   var pagina = md.termica ? '@page{size:80mm 297mm;margin:4mm}' : '@page{size:A4;margin:6mm}';
   var absoluto = location.href.split('#')[0].replace(/[^/]*$/, '') + LOGO_URL;
   var html = sheet.outerHTML.split('src="' + LOGO_URL + '"').join('src="' + (logoDados || absoluto) + '"');
-  var w = window.open('', '_blank');
-  if(!w){ avisar('O navegador bloqueou a janela de impressão. Libere pop-ups para este site.', true); return; }
-  w.document.open();
-  w.document.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(S.dataHoje) + '</title>' +
+  // Imprime pela própria tela: a folha vai para um quadro invisível, sem abrir outra guia.
+  var antigo = document.getElementById('precPrintFrame');
+  if(antigo) antigo.remove();
+  var quadro = document.createElement('iframe');
+  quadro.id = 'precPrintFrame';
+  quadro.setAttribute('aria-hidden', 'true');
+  quadro.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(quadro);
+  var doc = quadro.contentWindow.document;
+  doc.open();
+  doc.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(S.dataHoje) + '</title>' +
     '<link rel="stylesheet" href="' + FONTES_URL + '"><style>' + LABEL_CSS + '\nbody{margin:0;background:#fff}\n' + pagina +
     '\n@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.prec-sheet{padding:0;display:block}.prec-sheet.termica{width:auto}.grp + .grp{margin-top:5mm}}</style></head><body>' +
-    html + '<script>Promise.all([document.fonts.ready].concat(Array.from(document.images).map(function(i){return i.complete?0:new Promise(function(r){i.onload=i.onerror=r;});}))).then(function(){setTimeout(function(){window.print();},150);});<\/script></body></html>');
-  w.document.close();
+    html + '</body></html>');
+  doc.close();
+  var janela = quadro.contentWindow;
+  var esperas = [janela.document.fonts ? janela.document.fonts.ready : null].concat(Array.from(janela.document.images).map(function(img){
+    return img.complete ? null : new Promise(function(ok){ img.onload = img.onerror = ok; });
+  }));
+  if(typeof showOverlay === 'function') showOverlay('Preparando a impressão…');
+  Promise.all(esperas).then(function(){
+    setTimeout(function(){
+      if(typeof hideOverlay === 'function') hideOverlay();
+      janela.focus();
+      janela.print();
+    }, 150);
+  });
 }
 
 function baixar(nome, texto){
