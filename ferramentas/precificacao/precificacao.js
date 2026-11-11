@@ -334,9 +334,9 @@ function renderArquivos(){
   if(!S.arquivos.length){ st.textContent = S.base ? 'Arraste as planilhas de hoje.' : 'Carregue a base primeiro.'; return; }
   var lojas = [''].concat(S.base ? lojasDaBase(S.base) : []);
   st.innerHTML = '<div class="prec-flist">' + S.arquivos.map(function(f, i){
-    if(f.erro) return '<div class="prec-frow bad"><span class="fname">' + esc(f.nome) + '</span><span>Não consegui ler: ' + esc(f.erro) + '</span><button class="x" data-rm="' + i + '" type="button" aria-label="Remover">×</button></div>';
+    if(f.erro) return '<div class="prec-frow prec-frow-erro"><span class="fname">' + esc(f.nome) + '</span><span>Não consegui ler: ' + esc(f.erro) + '</span><button class="x" data-rm="' + i + '" type="button" aria-label="Remover">×</button></div>';
     var conflito = f.det && f.pelo && f.det.loja !== f.pelo;
-    return '<div class="prec-frow' + (conflito ? ' alert' : '') + '"><span class="fname">' + esc(f.nome) + '</span><span>' + f.recs.length.toLocaleString('pt-BR') + ' produtos</span>' +
+    return '<div class="prec-frow' + (conflito ? ' prec-frow-aviso' : '') + '"><span class="fname">' + esc(f.nome) + '</span><span>' + f.recs.length.toLocaleString('pt-BR') + ' produtos</span>' +
       '<label>é a <select data-i="' + i + '">' + lojas.map(function(l){
         return '<option value="' + l + '"' + (l === f.loja ? ' selected' : '') + '>' + (l === '' ? 'escolha a loja' : esc(nomeLoja(l))) + '</option>';
       }).join('') + '</select></label>' +

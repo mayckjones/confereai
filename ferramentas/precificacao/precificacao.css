@@ -38,8 +38,8 @@
 
 .tool-precificacao .prec-flist{ display:flex; flex-direction:column; gap:6px; }
 .tool-precificacao .prec-frow{ display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; border:1px solid var(--gray-100); border-radius:9px; padding:7px 10px; font-size:12.5px; }
-.tool-precificacao .prec-frow.alert{ border-color:var(--amber); background:var(--amber-bg); }
-.tool-precificacao .prec-frow.bad{ border-color:var(--red); background:var(--red-bg); color:var(--red); }
+.tool-precificacao .prec-frow.prec-frow-aviso{ border-color:var(--amber); background:var(--amber-bg); }
+.tool-precificacao .prec-frow.prec-frow-erro{ border-color:var(--red); background:var(--red-bg); color:var(--red); }
 .tool-precificacao .prec-frow .fname{ font-weight:700; }
 .tool-precificacao .prec-frow .muted{ color:var(--gray-500); }
 .tool-precificacao .prec-frow select{ margin-left:4px; }
