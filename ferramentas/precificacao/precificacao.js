@@ -413,8 +413,8 @@ function renderTabela(){
 function medidas(){
   var termica = el('precPapel').value === 'termica';
   var lw, lh;
-  if(termica){ lw = 72; lh = 40; } else { var m = el('precSize').value.split('x').map(Number); lw = m[0]; lh = m[1]; }
-  return { termica: termica, lw: lw, lh: lh, escala: Math.max(0.72, Math.min(lw / 66, 1.35)) };
+  if(termica){ lw = 72; lh = 32; } else { var m = el('precSize').value.split('x').map(Number); lw = m[0]; lh = m[1]; }
+  return { termica: termica, lw: lw, lh: lh, escala: Math.max(0.6, Math.min(lw / 66, lh / 36, 1.35)) };
 }
 
 function htmlEtiqueta(r, i, comBarras){
