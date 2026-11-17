@@ -471,14 +471,24 @@ function renderEtiquetas(){
       for(var q = 0; q < r.quantidade; q++) g.html.push(htmlEtiqueta(r, 'm' + i + '_' + q, comBarras));
     });
   }
-  var lista = linhas.slice(0, 1500).sort(function(a, b){ return a.loja - b.loja || a.descricao.localeCompare(b.descricao); });
+  var LIMITE = 1500;
+  var lista = linhas.slice().sort(function(a, b){ return a.loja - b.loja || a.descricao.localeCompare(b.descricao); }).slice(0, LIMITE);
+  var foraDoLimite = linhas.length - lista.length;
   lista.forEach(function(r, i){
     var g = grupos[grupos.length - 1];
     if(!g || g.loja !== r.loja){ g = { loja: r.loja, titulo: nomeLoja(r.loja), html: [] }; grupos.push(g); }
     g.html.push(htmlEtiqueta(r, i, comBarras));
   });
   var total = grupos.reduce(function(t, g){ return t + g.html.length; }, 0);
-  el('precLblCount').textContent = total.toLocaleString('pt-BR');
+  el('precLblCount').textContent = foraDoLimite > 0
+    ? total.toLocaleString('pt-BR') + ' de ' + (total + foraDoLimite).toLocaleString('pt-BR')
+    : total.toLocaleString('pt-BR');
+  el('precLimite').hidden = foraDoLimite <= 0;
+  if(foraDoLimite > 0){
+    el('precLimite').innerHTML = '<b>Passou do limite de ' + LIMITE.toLocaleString('pt-BR') + ' etiquetas por vez.</b> ' +
+      foraDoLimite.toLocaleString('pt-BR') + ' etiqueta' + (foraDoLimite > 1 ? 's ficaram' : ' ficou') + ' de fora da folha. ' +
+      'Clique em uma loja no resumo para imprimir uma de cada vez' + (el('precTipo').value === 'all' ? ', ou troque "Mostrar" para "Todos os alterados" se quer só o que mudou de preço.' : ', ou filtre por classificação.');
+  }
   el('precEtiquetas').hidden = !S.linhas.length && !S.manuais.length;
   sheet.innerHTML = grupos.length ? grupos.map(function(g){
     return '<section class="grp"><h3 class="grp-h">' + esc(g.titulo) + '<span>' + g.html.length + ' etiqueta' + (g.html.length > 1 ? 's' : '') + '</span></h3>' +

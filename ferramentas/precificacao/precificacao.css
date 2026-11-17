@@ -129,4 +129,5 @@
 /* ---------- PASSO 3: ETIQUETAS ---------- */
 .tool-precificacao .section-head:has(.prec-print-opts){ align-items:center; flex-wrap:wrap; gap:10px; }
 .tool-precificacao .prec-print-opts{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; font-size:13px; color:var(--gray-700); }
+.tool-precificacao #precLimite{ margin:0 0 12px; }
 .tool-precificacao .prec-sheet{ background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); overflow-x:auto; }
