@@ -422,10 +422,11 @@
       <div class="detail-metrics" id="cardMetrics"></div>
       <div class="integrity-banner" id="cardIntegrity" role="status"></div>
       <div class="panel detail-panel">
-        <div class="panel-head"><h3>Conferência por venda</h3><span class="count" id="cardVisibleCount"></span></div>
+        <div class="panel-head"><h3>Conferência por venda</h3><div class="panel-head-side"><span class="fix-progress" id="cardFixProgress" hidden><span id="cardFixCount"></span><button type="button" class="fix-clear" id="btnClearFixes" hidden>Desmarcar todas</button></span><span class="count" id="cardVisibleCount"></span></div></div>
         <div class="detail-toolbar"><div class="detail-filters" role="group" aria-label="Filtrar conferência"><button class="active" data-card-filter="pending" aria-pressed="true">Pendências</button><button data-card-filter="all" aria-pressed="false">Todas</button><button data-card-filter="brand" aria-pressed="false">Bandeira</button><button data-card-filter="mode" aria-pressed="false">Débito / crédito</button><button data-card-filter="installments" aria-pressed="false">Parcelas</button></div><label class="detail-search"><span>Buscar</span><input id="cardSearch" type="search" placeholder="Registro, NSU, bandeira…"></label></div>
         <div class="card-color-legend" aria-label="Legenda das cores da conferência">
           <span class="legend-warning"><i aria-hidden="true"></i> Nos dados do cartão, âmbar destaca o campo divergente. Os demais ficam em cinza.</span>
+          <span class="legend-check"><i aria-hidden="true"></i> Marque a venda depois de corrigi-la no sistema. O registro da última marcada fica em destaque. As marcações ficam salvas neste navegador.</span>
         </div>
         <div class="table-scroll"><table class="card-audit-table"><thead><tr><th>Venda / registro</th><th class="num">Valor bruto</th><th>No sistema</th><th>Na Cielo</th><th>Conferência</th></tr></thead><tbody id="cardAuditBody"></tbody></table></div>
         <div class="empty-state" id="cardEmpty" hidden><h4>Nenhuma venda neste filtro</h4><p>Experimente visualizar todas as vendas ou ajustar a busca.</p></div>

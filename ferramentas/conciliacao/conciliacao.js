@@ -109,6 +109,14 @@ function responsibilityMeta(tx){
   return '<small class="responsibility-meta">Cx/Tu ' + escapeHtml(tx.caixaTurno || '—') + ' · Vend. ' + escapeHtml(tx.codigoVendedor || '—') + '</small>';
 }
 
+// Identifica a venda marcada como corrigida na conferência por venda. Usa a
+// loja e a data porque o mesmo registro pode aparecer em outra loja ou dia,
+// e a hora e o valor para separar registros repetidos na Relação.
+function cardCheckKey(row){
+  var tx = row.sale || row.launch || row.bank || {};
+  return [row.sale ? 'venda' : row.launch ? 'lancamento' : 'cielo', tx.loja || '', tx.data || '', tx.registro || '', tx.hora || '', tx.nsu || '', cents(tx.valor || 0)].join('|');
+}
+
 // Cada parcela permanece na origem; apenas a visão por venda é consolidada.
 function parseCardLaunchLines(lines){
   var data = null, loja = '', out = [];
@@ -2542,14 +2550,63 @@ function renderCardRows(){
     return '<span class="audit-issue">' + escapeHtml(issue) + '</span>';
   }
   document.getElementById('cardAuditBody').innerHTML = rows.map(function(r){
-    var tx = r.sale || r.launch || r.bank;
-    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"><td><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><small>Registro ' + escapeHtml((r.sale || r.launch || {}).registro || '—') + '</small>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + escapeHtml(linkText(r)) + '</p></details></td></tr>';
+    var tx = r.sale || r.launch || r.bank, registro = (r.sale || r.launch || {}).registro;
+    // Só as vendas com pendência recebem a caixa "corrigida"; as demais mantêm o alinhamento.
+    var check = r.issues.length ? '<label class="fix-check" title="Marque depois de corrigir a venda no sistema"><input type="checkbox" aria-label="Venda corrigida' + (registro ? ', registro ' + escapeHtml(registro) : '') + '"></label>' : '<span class="fix-check-space" aria-hidden="true"></span>';
+    return '<tr class="' + (r.issues.length ? 'audit-pending' : '') + '"' + (r.issues.length ? ' data-check-key="' + escapeHtml(cardCheckKey(r)) + '"' : '') + '><td><div class="audit-sale">' + check + '<div><strong>' + (tx.data ? formatDateBR(tx.data) : '—') + (r.sale && r.sale.hora ? ' · ' + escapeHtml(r.sale.hora) : '') + '</strong><span class="audit-registro">Registro <b>' + escapeHtml(registro || '—') + '</b></span>' + (r.issues.length ? responsibilityMeta(r.sale) : '') + '</div></div></td><td class="num">' + fmtBRL(tx.valor) + (r.bank && cents(r.bank.valor) !== cents(tx.valor) ? '<small>Cielo ' + fmtBRL(r.bank.valor) + '</small>' : '') + '</td><td>' + cardCell(r.launch, r) + '</td><td>' + cardCell(r.bank, r) + '</td><td>' + (r.issues.length ? r.issues.map(function(issue){ return issueCell(issue, r); }).join('') : '<span class="audit-success">✓ Conferido</span>') + '<details class="audit-evidence"><summary>Ver origem</summary><p>Relação: ' + escapeHtml(r.sale && r.sale.raw || 'Não encontrada') + '</p><p>Lançamentos: ' + escapeHtml(r.launch ? r.launch.linhas.map(function(l){ return l.raw; }).join(' / ') : 'Sem vínculo único') + '</p><p>Cielo: ' + escapeHtml(r.bank && r.bank.raw || 'Sem vínculo seguro') + '</p><p>Vínculo Cielo: ' + escapeHtml(linkText(r)) + '</p></details></td></tr>';
   }).join('');
   document.getElementById('cardVisibleCount').textContent = rows.length + ' de ' + state.cardAudit.rows.length + ' vendas';
   document.getElementById('cardEmpty').hidden = rows.length > 0;
+  updateCardChecks();
 }
 document.querySelectorAll('[data-card-filter]').forEach(function(button){ button.addEventListener('click', function(){ state.cardFilter = button.dataset.cardFilter; renderCardRows(); }); });
 document.getElementById('cardSearch').addEventListener('input', renderCardRows);
+
+/* Checklist da conferência por venda: marca as vendas já corrigidas no sistema
+   e destaca o registro da última marcada. Fica salvo neste navegador, para não
+   perder o ponto ao recarregar a página ou processar os relatórios de novo. */
+var CARD_CHECKS_STORAGE = 'confereai-conciliacao-corrigidas';
+var CARD_CHECKS_DAYS = 45;
+var cardChecks = loadCardChecks();
+function loadCardChecks(){
+  try {
+    var saved = JSON.parse(localStorage.getItem(CARD_CHECKS_STORAGE) || '{}'), limit = Date.now() - CARD_CHECKS_DAYS * 864e5, marks = {};
+    Object.keys(saved).forEach(function(key){ if(saved[key] > limit) marks[key] = saved[key]; });
+    return marks;
+  } catch(e){ return {}; }
+}
+function saveCardChecks(){
+  try { localStorage.setItem(CARD_CHECKS_STORAGE, JSON.stringify(cardChecks)); } catch(e){}
+}
+function updateCardChecks(){
+  if(!state.cardAudit || state.cardAudit.blocked) return;
+  var pending = state.cardAudit.rows.filter(function(r){ return r.issues.length; }).map(cardCheckKey);
+  var marked = pending.filter(function(key){ return cardChecks[key]; });
+  var last = marked.reduce(function(a, key){ return !a || cardChecks[key] > cardChecks[a] ? key : a; }, null);
+  document.querySelectorAll('#cardAuditBody tr[data-check-key]').forEach(function(tr){
+    var key = tr.dataset.checkKey, done = !!cardChecks[key];
+    tr.classList.toggle('is-fixed', done);
+    tr.classList.toggle('is-last-fixed', key === last);
+    tr.querySelector('.fix-check input').checked = done;
+  });
+  document.getElementById('cardFixProgress').hidden = !pending.length;
+  document.getElementById('cardFixCount').textContent = marked.length + ' de ' + pending.length + (pending.length === 1 ? ' corrigida' : ' corrigidas');
+  document.getElementById('btnClearFixes').hidden = !marked.length;
+}
+document.getElementById('cardAuditBody').addEventListener('change', function(e){
+  var row = e.target.closest('.fix-check') && e.target.closest('tr[data-check-key]');
+  if(!row) return;
+  if(e.target.checked) cardChecks[row.dataset.checkKey] = Date.now();
+  else delete cardChecks[row.dataset.checkKey];
+  saveCardChecks();
+  updateCardChecks();
+});
+document.getElementById('btnClearFixes').addEventListener('click', function(){
+  if(!confirm('Desmarcar todas as vendas corrigidas desta conferência?')) return;
+  state.cardAudit.rows.forEach(function(r){ delete cardChecks[cardCheckKey(r)]; });
+  saveCardChecks();
+  updateCardChecks();
+});
 
 function exportVinculo(confidence){ return confidence === 'horario' ? 'Data e horário próximo' : confidence === 'entrega' ? 'POS: tempo da entrega' : 'Revisar'; }
 function withStore(loja, row){ return loja ? Object.assign({ 'Loja': storeName(loja) }, row) : row; }

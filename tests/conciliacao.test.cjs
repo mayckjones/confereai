@@ -10,7 +10,7 @@ function loadEngine(){
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
   vm.runInContext(shared.slice(shared.indexOf('function fmtBRL')), context);
   const source = fs.readFileSync(path.join(root, 'ferramentas/conciliacao/conciliacao.js'), 'utf8');
-  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile, launchCoverageMessage, linkLaunches, assignCieloStores, reconcileStores, storeName }; };', context);
+  vm.runInContext(source.slice(0, source.indexOf("var dropzone =")) + '\n' + source.slice(source.indexOf('function buildCardGroups('), source.indexOf('function cardGroups(')) + '\nreturn { brandLabel, paymentLabel, parseCardLaunchLines, aggregateCardLaunches, parseCaixaLines, parseCieloPdfLines, matchCardTransactions, buildCardAudit, cardRangeWarning, buildCardGroups, buildCardChannelGroups, reconcile, launchCoverageMessage, linkLaunches, assignCieloStores, reconcileStores, storeName, cardCheckKey }; };', context);
   return context.window.__tool_init_conciliacao();
 }
 module.exports = { loadEngine };
@@ -36,6 +36,16 @@ test('Relação preserva Cx/Tu e código do vendedor para identificar o respons�
   assert.equal(result.divergences[0].codigoVendedor, '53');
 });
 
+test('marcação de venda corrigida não passa para outra loja, dia ou registro repetido', () => {
+  const key = (r) => engine.cardCheckKey(r);
+  const base = sale(85.98, '08:39', '1233606');
+  assert.equal(key({ sale: base }), key({ sale: { ...base } }));
+  assert.notEqual(key({ sale: base }), key({ sale: { ...base, loja: '1' } }));
+  assert.notEqual(key({ sale: base }), key({ sale: { ...base, data: '2026-09-10' } }));
+  assert.notEqual(key({ sale: base }), key({ sale: { ...base, hora: '09:14', valor: 85.63 } }));
+  // Venda só na Cielo, sem registro: usa os dados da própria Cielo.
+  assert.match(key({ bank: { ...bank(41.97, '09:16'), loja: '7', nsu: '000500003' } }), /^cielo\|7\|2026-09-09\|\|09:16\|000500003\|4197$/);
+});
 test('parcelas se somam em centavos, com NSU preservado e total impresso validado', () => {
   const lines = engine.parseCardLaunchLines(launchFixture);
   const groups = engine.aggregateCardLaunches(lines);

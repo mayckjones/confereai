@@ -168,7 +168,7 @@
 .tool-conciliacao .detail-search input{ padding:9px 11px; border:1px solid var(--gray-200); background:var(--card-bg); border-radius:8px; font-family:inherit; color:var(--ink); width:205px; }
 .tool-conciliacao .card-audit-table{ min-width:830px; font-size:12px; }
 .tool-conciliacao .card-audit-table td{ vertical-align:top; padding:17px 16px; }
-.tool-conciliacao .card-audit-table td:first-child{ min-width:170px; }
+.tool-conciliacao .card-audit-table td:first-child{ min-width:200px; }
 .tool-conciliacao .card-audit-table td:nth-child(3),.tool-conciliacao .card-audit-table td:nth-child(4){ min-width:185px; }
 .tool-conciliacao .card-audit-table small{ display:block; font-size:10px; color:var(--gray-500); margin-top:7px; font-family:inherit; }
 .tool-conciliacao .brand-mark svg{ filter:grayscale(1); opacity:.7; }
@@ -205,6 +205,25 @@
 .tool-conciliacao .card-color-legend{ display:flex; align-items:center; flex-wrap:wrap; gap:8px 18px; padding:8px 18px 12px; border-top:1px solid var(--gray-100); color:var(--gray-500); font-size:10px; }
 .tool-conciliacao .card-color-legend > span{ display:inline-flex; align-items:center; gap:5px; }
 .tool-conciliacao .card-color-legend .legend-warning i{ display:inline-block; width:13px; height:13px; background:var(--amber-bg); border:1px solid var(--amber); border-radius:4px; }
+.tool-conciliacao .card-color-legend .legend-check i{ display:inline-block; width:13px; height:13px; background:var(--green-bg); border:1px solid var(--green); border-radius:4px; }
+/* Checklist das vendas corrigidas e destaque do registro */
+.tool-conciliacao .panel-head-side{ display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px 12px; }
+.tool-conciliacao .fix-progress{ display:inline-flex; align-items:center; gap:10px; font-size:11.5px; font-weight:700; color:var(--green); font-variant-numeric:tabular-nums; }
+.tool-conciliacao .fix-progress[hidden],.tool-conciliacao .fix-clear[hidden]{ display:none; }
+.tool-conciliacao .fix-clear{ padding:2px 0; border:0; background:none; color:var(--gray-500); font:inherit; font-size:11px; font-weight:600; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+.tool-conciliacao .fix-clear:hover{ color:var(--ink); }
+.tool-conciliacao .audit-sale{ display:flex; align-items:flex-start; gap:10px; }
+.tool-conciliacao .fix-check{ display:inline-flex; flex-shrink:0; margin:-4px; padding:4px; border-radius:6px; cursor:pointer; }
+.tool-conciliacao .fix-check:hover{ background:var(--green-bg); }
+.tool-conciliacao .fix-check input{ width:17px; height:17px; margin:0; accent-color:var(--green); cursor:pointer; }
+.tool-conciliacao .fix-check-space{ width:17px; flex-shrink:0; }
+.tool-conciliacao .audit-registro{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:7px; font-size:10px; color:var(--gray-500); }
+.tool-conciliacao .audit-registro b{ padding:2px 7px; border-radius:5px; background:var(--sky-bg); color:var(--sky); font-family:var(--mono); font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+.tool-conciliacao .card-audit-table tr.is-fixed td{ background:var(--green-bg); }
+.tool-conciliacao .card-audit-table tr.is-fixed td:first-child{ box-shadow:inset 3px 0 0 var(--green); }
+.tool-conciliacao .card-audit-table tr.is-last-fixed td:first-child{ box-shadow:inset 4px 0 0 var(--sky); }
+.tool-conciliacao tr.is-last-fixed .audit-registro b{ background:var(--sky); color:var(--card-bg); font-size:14px; box-shadow:0 0 0 3px var(--sky-bg); }
+.tool-conciliacao tr.is-last-fixed .audit-registro::after{ content:'Último marcado'; color:var(--sky); font-size:9.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; }
 [data-theme="dark"] .tool-conciliacao{ --amber:#f5b549; --green:#4ade80; --sky:#82aeff; }
 [data-theme="dark"] .tool-conciliacao .detail-eyebrow,[data-theme="dark"] .tool-conciliacao .result-tabs button.active,[data-theme="dark"] .tool-conciliacao .detail-filters button.active{ color:#82aeff; }
 @media(max-width:1000px){ .tool-conciliacao .coverage-compare{ grid-template-columns:1fr; } .tool-conciliacao .detail-upload{ grid-template-columns:1fr; gap:16px; } .tool-conciliacao .detail-heading{ align-items:flex-start; flex-direction:column; } .tool-conciliacao .net-summary{ grid-template-columns:repeat(2,1fr); } }
