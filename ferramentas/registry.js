@@ -42,7 +42,7 @@ const TOOLS_REGISTRY = [
       <line x1="7" y1="7" x2="7.01" y2="7"/>
     </svg>`,
     category: 'Operacional',
-    badge: 'Nova',
+    badge: null,
     color: '#c8141e'
   }
   // ───────────────────────────────────────────────
