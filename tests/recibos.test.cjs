@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 
-function loadEngine() {
+function loadEngine(windowExtras = {}) {
   const elements = new Map();
   function element() {
     const result = {
@@ -30,7 +30,7 @@ function loadEngine() {
     createElement: element, querySelector() { return null; }
   };
   const context = vm.createContext({
-    window: { addEventListener() {}, removeEventListener() {} }, document, console,
+    window: { addEventListener() {}, removeEventListener() {}, ...windowExtras }, document, console,
     showToast() {}, setTimeout() {},
   });
   const shared = fs.readFileSync(path.join(root, 'js/shared.js'), 'utf8');
@@ -117,8 +117,62 @@ test('Word recebe os mesmos motivos e datas de pagamento', () => {
   engine.carregarRecibos(engine.extrairRegistrosTabulares([headers, row('Comissão'), row('Premiação')]), 'recibos.xlsx');
   for (const receipt of engine.getRecibos()) {
     const document = JSON.stringify(engine.gerarParagrafosReciboDocx(docx, receipt));
+    assert.ok(document.includes('RECIBO Nº'));
+    assert.ok(document.includes(receipt.numero));
     assert.ok(document.includes(receipt.referente));
     assert.ok(document.includes('09/10/2026'));
     assert.ok(document.includes(receipt.emissao));
   }
+});
+
+// Número do recibo: 1 letra (sem I e O) + 4 números.
+const formatoNumero = /^[A-HJ-NP-Z]\d{4}$/;
+
+test('cada recibo recebe um número sorteado, sem repetir no lote nem ao carregar de novo', () => {
+  const engine = loadEngine();
+  const linhas = Array.from({ length: 300 }, () => row(''));
+  engine.carregarRecibos(engine.extrairRegistrosTabulares([headers, ...linhas]), 'recibos.xlsx');
+  const primeiros = engine.getRecibos().map(r => r.numero);
+  assert.ok(primeiros.every(n => formatoNumero.test(n)), 'formato letra + 4 números');
+  assert.equal(new Set(primeiros).size, 300, 'nenhum repetido no lote');
+  // Não é sequência: os números de recibos seguidos não andam de 1 em 1.
+  const proximo = n => n[0] + String(Number(n.slice(1)) + 1).padStart(4, '0');
+  const emSequencia = primeiros.slice(1).filter((n, i) => n === proximo(primeiros[i])).length;
+  assert.ok(emSequencia < 5);
+
+  // Anexar os mesmos dados de novo gera números novos.
+  engine.carregarRecibos(engine.extrairRegistrosTabulares([headers, ...linhas]), 'recibos.xlsx');
+  const segundos = engine.getRecibos().map(r => r.numero);
+  assert.ok(segundos.every(n => !primeiros.includes(n)));
+});
+
+test('botão sorteia novo número e atualiza prévia, tabela, PDF e impressão', () => {
+  const engine = loadEngine();
+  engine.carregarRecibos(engine.extrairRegistrosTabulares([headers, row('')]), 'recibos.xlsx');
+  const antes = engine.getRecibos()[0].numero;
+  assert.equal(engine.elements.get('viewNumero').textContent, antes);
+  assert.equal(engine.elements.get('editNumeroRecibo').textContent, antes);
+
+  engine.elements.get('btnNovoNumeroRecibo').click();
+  const depois = engine.getRecibos()[0].numero;
+  assert.match(depois, formatoNumero);
+  assert.notEqual(depois, antes);
+  assert.equal(engine.elements.get('viewNumero').textContent, depois);
+  assert.equal(engine.elements.get('editNumeroRecibo').textContent, depois);
+  assert.ok(engine.elements.get('recibosTableBody').children[0].innerHTML.includes(depois));
+  const impressao = engine.elements.get('printAllContainer').children[0].innerHTML;
+  assert.ok(impressao.includes('RECIBO Nº') && impressao.includes(depois));
+});
+
+test('números guardados no navegador nunca são sorteados de novo', async () => {
+  const guardado = { 'confereai-recibos-numeros-usados': 'A0000,B0000' };
+  const localStorage = { getItem: k => guardado[k] ?? null, setItem: (k, v) => { guardado[k] = v; } };
+  // Sorteios forçados: 0 → A0000 (já usado), 10000 → B0000 (já usado), 80001 → J0001.
+  const sorteios = [0, 10000, 80001];
+  const crypto = { getRandomValues: arr => { arr[0] = sorteios.shift(); return arr; } };
+  const engine = loadEngine({ localStorage, crypto });
+  engine.carregarRecibos(engine.extrairRegistrosTabulares([headers, row('')]), 'recibos.xlsx');
+  assert.equal(engine.getRecibos()[0].numero, 'J0001', 'pula os usados; a letra I não existe');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(guardado['confereai-recibos-numeros-usados'].split(',').sort(), ['A0000', 'B0000', 'J0001']);
 });

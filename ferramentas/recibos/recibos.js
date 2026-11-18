@@ -23,9 +23,9 @@ window.__tool_init_recibos = function() {
   // ESTADO DA APLICAÇÃO
   let recibosList = [];
   let currentIndex = 0;
-  const defaultLogoDataUri = window.FARMACIA_LOGO_BASE64 
-    ? ('data:image/jpeg;base64,' + window.FARMACIA_LOGO_BASE64)
-    : 'ferramentas/recibos/farmacia_logo.jpeg';
+  const defaultLogoDataUri = window.FARMACIA_LOGO_BASE64
+    ? ('data:' + (window.FARMACIA_LOGO_MIME || 'image/png') + ';base64,' + window.FARMACIA_LOGO_BASE64)
+    : 'ferramentas/recibos/farmacia_logo.png';
 
   const criarConfigPadrao = () => ({
     empresa: 'FARMACIA DO TRABALHADOR DE ALAGOAS',
@@ -55,6 +55,67 @@ window.__tool_init_recibos = function() {
 
   function obterNomeTipo(tipo) {
     return { comissao: 'Comissão', premiacao: 'Premiação' }[tipo] || 'Padrão';
+  }
+
+  // =========================================================================
+  // NÚMERO DO RECIBO (CONTAS A PAGAR): 1 LETRA + 4 NÚMEROS, SORTEADOS
+  // Não é sequência: cada recibo novo recebe um código sorteado. A letra não
+  // usa I nem O, que se confundem com 1 e 0. São 24 × 10.000 = 240.000
+  // códigos possíveis. Os códigos já sorteados ficam guardados neste
+  // navegador e não saem de novo; se sair um repetido, sorteia outra vez.
+  // =========================================================================
+  const LETRAS_NUMERO_RECIBO = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const CHAVE_NUMEROS_USADOS = 'confereai-recibos-numeros-usados';
+  const LIMITE_NUMEROS_GUARDADOS = 100000;
+  const numerosUsados = carregarNumerosUsados();
+  let gravacaoNumerosPendente = false;
+
+  function carregarNumerosUsados() {
+    try {
+      const salvos = window.localStorage.getItem(CHAVE_NUMEROS_USADOS);
+      return new Set(salvos ? salvos.split(',') : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function gravarNumerosUsados() {
+    gravacaoNumerosPendente = false;
+    try {
+      // Junta com o que outra aba aberta possa ter gravado, para não perder códigos.
+      carregarNumerosUsados().forEach(codigo => { if (codigo) numerosUsados.add(codigo); });
+      while (numerosUsados.size > LIMITE_NUMEROS_GUARDADOS) numerosUsados.delete(numerosUsados.values().next().value);
+      window.localStorage.setItem(CHAVE_NUMEROS_USADOS, Array.from(numerosUsados).join(','));
+    } catch (e) {
+      // Sem armazenamento no navegador: a checagem continua valendo nesta sessão.
+    }
+  }
+
+  // Sorteio pelo gerador criptográfico do navegador, com a mesma chance para cada código.
+  function sortearAte(max) {
+    const cripto = window.crypto || (typeof crypto !== 'undefined' ? crypto : null);
+    if (!cripto || !cripto.getRandomValues) return Math.floor(Math.random() * max);
+    const limite = Math.floor(0x100000000 / max) * max;
+    const sorteio = new Uint32Array(1);
+    do { cripto.getRandomValues(sorteio); } while (sorteio[0] >= limite);
+    return sorteio[0] % max;
+  }
+
+  function gerarNumeroRecibo() {
+    let codigo;
+    do {
+      const n = sortearAte(LETRAS_NUMERO_RECIBO.length * 10000);
+      codigo = LETRAS_NUMERO_RECIBO[Math.floor(n / 10000)] + String(n % 10000).padStart(4, '0');
+    } while (numerosUsados.has(codigo));
+    numerosUsados.add(codigo);
+    // Guarda os 100.000 mais recentes (cerca de 600 KB); o mais antigo sai da lista.
+    while (numerosUsados.size > LIMITE_NUMEROS_GUARDADOS) numerosUsados.delete(numerosUsados.values().next().value);
+    // Grava uma vez só depois do lote (uma planilha gera vários recibos de uma vez).
+    if (!gravacaoNumerosPendente) {
+      gravacaoNumerosPendente = true;
+      Promise.resolve().then(gravarNumerosUsados);
+    }
+    return codigo;
   }
 
   // ELEMENTOS DO DOM
@@ -112,11 +173,14 @@ window.__tool_init_recibos = function() {
   const editEmissao = document.getElementById('editEmissao');
   const btnDeleteCurrentReceipt = document.getElementById('btnDeleteCurrentReceipt');
   const btnAddNewReceipt = document.getElementById('btnAddNewReceipt');
+  const editNumeroRecibo = document.getElementById('editNumeroRecibo');
+  const btnNovoNumeroRecibo = document.getElementById('btnNovoNumeroRecibo');
 
   // Tabela
   const recibosTableBody = document.getElementById('recibosTableBody');
 
   // Preview Word
+  const viewNumero = document.getElementById('viewNumero');
   const viewLoja = document.getElementById('viewLoja');
   const viewValor = document.getElementById('viewValor');
   const viewVendedor = document.getElementById('viewVendedor');
@@ -291,6 +355,7 @@ window.__tool_init_recibos = function() {
       const tipoRecibo = normalizarTipoRecibo(item.tipoRecibo);
 
       return {
+        numero: gerarNumeroRecibo(),
         vendedor: String(item.vendedor || item.nome || '').trim().toUpperCase(),
         cpf: String(item.cpf || '').trim(),
         valor: val,
@@ -340,6 +405,7 @@ window.__tool_init_recibos = function() {
   function iniciarModoManual() {
     const dataHoje = obterDataHojeFormatada();
     const itemManual = {
+      numero: gerarNumeroRecibo(),
       vendedor: '',
       cpf: '',
       valor: 0,
@@ -416,6 +482,7 @@ window.__tool_init_recibos = function() {
     btnNextReceipt.disabled = (currentIndex === recibosList.length - 1);
 
     // Formulário
+    editNumeroRecibo.textContent = r.numero || '—';
     editVendedor.value = r.vendedor || '';
     editLoja.value = r.loja || '';
     editCPF.value = r.cpf || '';
@@ -429,6 +496,7 @@ window.__tool_init_recibos = function() {
     editEmissao.value = r.emissao || mestreConfig.emissao;
 
     // PREVIEW WORD EM TEMPO REAL
+    viewNumero.textContent = r.numero || '—';
     viewLoja.textContent = r.loja || '—';
     viewValor.textContent = formatarMoeda(r.valor);
     viewVendedor.textContent = r.vendedor || 'NOME DO VENDEDOR';
@@ -507,6 +575,19 @@ window.__tool_init_recibos = function() {
     renderizarTabela();
   });
 
+  // Sorteia outro código para o recibo aberto. O código anterior continua
+  // guardado como usado, porque ele pode já ter sido impresso.
+  btnNovoNumeroRecibo.addEventListener('click', () => {
+    if (recibosList.length === 0) return;
+    const r = recibosList[currentIndex];
+    r.numero = gerarNumeroRecibo();
+    editNumeroRecibo.textContent = r.numero;
+    viewNumero.textContent = r.numero;
+    renderizarTabela();
+    atualizarContainerImpressaoGeral();
+    showToast(`Novo número do recibo: ${r.numero}`);
+  });
+
   editSemCPF.addEventListener('change', () => {
     if (recibosList.length === 0) return;
     const r = recibosList[currentIndex];
@@ -547,6 +628,7 @@ window.__tool_init_recibos = function() {
 
       tr.innerHTML = `
         <td><strong>${idx + 1}</strong></td>
+        <td class="font-mono recibo-numero-cell">${r.numero || '—'}</td>
         <td>${r.vendedor || '—'}</td>
         <td class="font-mono">${r.semCPF ? 'Sem CPF' : (r.cpf || '—')}</td>
         <td class="font-mono">R$ ${formatarMoeda(r.valor)}</td>
@@ -601,6 +683,7 @@ window.__tool_init_recibos = function() {
   btnAddNewReceipt.addEventListener('click', () => {
     const ultimo = (recibosList.length > 0 && recibosList[currentIndex]) ? recibosList[currentIndex] : null;
     const novo = {
+      numero: gerarNumeroRecibo(),
       vendedor: '',
       cpf: '',
       valor: 0,
@@ -1036,37 +1119,48 @@ window.__tool_init_recibos = function() {
     // Elementos internos do card do recibo
     const cardElements = [];
 
-    // Logotipo Real da Farmácia (se disponível)
-    if (logoUint8) {
-      cardElements.push(
-        new Paragraph({
+    // Cabeçalho: logo à esquerda e número do recibo à direita, na mesma altura.
+    // A logo mantém a proporção da imagem (826 × 715).
+    const logoParagrafo = logoUint8
+      ? new Paragraph({
           alignment: AlignmentType.LEFT,
-          children: [
-            new ImageRun({
-              data: logoUint8,
-              transformation: { width: 52, height: 52 }
-            })
-          ],
-          spacing: { before: 0, after: 120 }
+          children: [new ImageRun({ data: logoUint8, transformation: { width: 84, height: 73 } })],
+          spacing: { before: 0, after: 0 }
         })
-      );
-    } else {
-      cardElements.push(
-        new Paragraph({
+      : new Paragraph({
           alignment: AlignmentType.LEFT,
-          children: [
-            new TextRun({
-              text: "FARMÁCIA DO TRABALHADOR DE ALAGOAS",
-              bold: true,
-              size: 18,
-              color: "D82B27",
-              font: "Calibri"
-            })
-          ],
-          spacing: { before: 40, after: 140 }
-        })
-      );
-    }
+          children: [new TextRun({ text: "FARMÁCIA DO TRABALHADOR DE ALAGOAS", bold: true, size: 18, color: "D82B27", font: "Calibri" })],
+          spacing: { before: 40, after: 0 }
+        });
+    const semBorda = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+    cardElements.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: { top: semBorda, bottom: semBorda, left: semBorda, right: semBorda, insideHorizontal: semBorda, insideVertical: semBorda },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: [logoParagrafo] }),
+              new TableCell({
+                width: { size: 50, type: WidthType.PERCENTAGE },
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.RIGHT,
+                    children: [new TextRun({ text: "RECIBO Nº", bold: true, size: 14, color: "777777", font: "Calibri", characterSpacing: 40 })],
+                    spacing: { before: 200, after: 30 }
+                  }),
+                  new Paragraph({
+                    alignment: AlignmentType.RIGHT,
+                    children: [new TextRun({ text: r.numero || "", bold: true, size: 30, color: "111111", font: "Calibri", characterSpacing: 40 })],
+                    spacing: { before: 0, after: 0 }
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
 
     // TÍTULO RECIBO
     cardElements.push(
@@ -1333,8 +1427,12 @@ window.__tool_init_recibos = function() {
 
       <!-- Moldura do Recibo Centralizada na Folha e Levemente Elevada -->
       <div style="width:100%; border:2px solid #222222; border-radius:60px; padding:44px 38px 48px; position:relative; background:#ffffff; box-sizing:border-box;">
-        <div style="position:absolute; top:24px; left:26px;">
-          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.jpeg'}" alt="Logo" style="width:58px; height:58px; object-fit:contain; border-radius:3px; display:block;">
+        <div style="position:absolute; top:12px; left:16px;">
+          <img src="${mestreConfig.logoUrl || 'ferramentas/recibos/farmacia_logo.png'}" alt="Logo" style="width:92px; height:auto; max-height:92px; object-fit:contain; display:block;">
+        </div>
+        <div style="position:absolute; top:36px; right:40px; text-align:right; line-height:1;">
+          <div style="font-size:8px; font-weight:700; letter-spacing:2px; color:#777777;">RECIBO Nº</div>
+          <div style="font-size:16px; font-weight:800; letter-spacing:2px; color:#111111; margin-top:6px;">${r.numero || ''}</div>
         </div>
         <h1 style="font-size:32px; font-weight:800; text-align:center; color:#111111; margin:28px 0 32px; letter-spacing:1px;">RECIBO</h1>
         <div style="text-align:right; font-size:23px; font-weight:800; color:#111111; margin-bottom:28px; padding-right:4px;">
@@ -1410,7 +1508,7 @@ window.__tool_init_recibos = function() {
 
       const opt = {
         margin: [4, 4, 4, 4],
-        filename: `Recibo_${safeName}_${safeData || currentIndex + 1}.pdf`,
+        filename: `Recibo_${r.numero ? r.numero + '_' : ''}${safeName}_${safeData || currentIndex + 1}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }

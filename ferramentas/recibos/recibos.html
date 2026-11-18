@@ -115,7 +115,7 @@
         <div class="form-group full-width">
           <label>Substituir Logotipo da Farmácia (.jpg ou .png)</label>
           <input type="file" id="mestreLogoInput" accept="image/jpeg,image/png,image/jpg" class="form-control" style="padding:6px; background:var(--card-bg);">
-          <small class="form-hint">Você pode carregar o arquivo por aqui ou colar sua imagem como <strong>farmacia_logo.jpg</strong> na pasta <code>ferramentas/recibos/</code></small>
+          <small class="form-hint">A troca vale para os recibos desta tela. A logo padrão fica embutida no arquivo <code>ferramentas/recibos/logo_base64.js</code>, gerado a partir de <strong>farmacia_logo.png</strong>.</small>
         </div>
       </div>
 
@@ -171,6 +171,18 @@
 
           <!-- Campos de Edição Individual -->
           <div class="form-card">
+            <div class="recibo-numero-box">
+              <div class="rnb-info">
+                <span class="rnb-label">Nº do recibo</span>
+                <strong class="rnb-code" id="editNumeroRecibo" aria-live="polite">—</strong>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnNovoNumeroRecibo" title="Sorteia outro número para este recibo">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+                Gerar novo número
+              </button>
+              <small class="rnb-hint">Para o contas a pagar: 1 letra e 4 números sorteados, que não se repetem neste navegador.</small>
+            </div>
+
             <div class="form-row">
               <div class="form-group flex-2">
                 <label>Nome do Vendedor</label>
@@ -182,7 +194,7 @@
               </div>
             </div>
 
-            <div class="form-row">
+            <div class="form-row form-row-equal">
               <div class="form-group flex-1">
                 <div class="cpf-label-row">
                   <label for="editCPF">CPF</label>
@@ -259,6 +271,7 @@
               <thead>
                 <tr>
                   <th>#</th>
+                  <th>Nº recibo</th>
                   <th>Vendedor</th>
                   <th>CPF</th>
                   <th>Valor</th>
@@ -305,8 +318,14 @@
               <!-- LOGOTIPO SUPERIOR ESQUERDO -->
               <div class="ws-logo-container">
                 <div class="ws-default-logo" id="viewLogo">
-                  <img src="ferramentas/recibos/farmacia_logo.jpeg" onerror="if(window.FARMACIA_LOGO_BASE64 && !this.dataset.fallback){this.dataset.fallback='1';this.src='data:image/jpeg;base64,'+window.FARMACIA_LOGO_BASE64;}" alt="Logo Farmácia" style="width: 58px; height: 58px; object-fit: contain; border-radius: 4px; display: block;">
+                  <img src="ferramentas/recibos/farmacia_logo.png" onerror="if(window.FARMACIA_LOGO_BASE64 && !this.dataset.fallback){this.dataset.fallback='1';this.src='data:'+(window.FARMACIA_LOGO_MIME||'image/png')+';base64,'+window.FARMACIA_LOGO_BASE64;}" alt="Logo Farmácia" style="object-fit: contain; display: block;">
                 </div>
+              </div>
+
+              <!-- NÚMERO DO RECIBO NO CANTO SUPERIOR DIREITO -->
+              <div class="ws-numero">
+                <span class="ws-numero-label">RECIBO Nº</span>
+                <span class="ws-numero-code" id="viewNumero">—</span>
               </div>
 
               <!-- TÍTULO CENTRAL -->

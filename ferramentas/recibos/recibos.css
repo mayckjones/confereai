@@ -429,17 +429,83 @@
   gap: 14px;
 }
 
-.tool-recibos .form-row:nth-of-type(2),
-.tool-recibos .form-row:nth-of-type(3) {
+.tool-recibos .form-row.form-row-equal {
   grid-template-columns: 1fr 1fr;
 }
 
 @media (max-width: 500px) {
   .tool-recibos .form-row,
-  .tool-recibos .form-row:nth-of-type(2),
-  .tool-recibos .form-row:nth-of-type(3) {
+  .tool-recibos .form-row.form-row-equal {
     grid-template-columns: 1fr;
   }
+}
+
+/* Número do recibo (contas a pagar) no topo do formulário */
+.tool-recibos .recibo-numero-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px dashed var(--gray-200);
+  border-radius: 10px;
+  background: var(--gray-50);
+}
+
+.tool-recibos .rnb-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tool-recibos .rnb-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.tool-recibos .rnb-code {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: 3px;
+  line-height: 1.2;
+}
+
+.tool-recibos .rnb-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--gray-400);
+}
+
+.tool-recibos .recibo-numero-box .btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 500px) {
+  .tool-recibos .recibo-numero-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tool-recibos .rnb-hint {
+    flex-basis: auto;
+  }
+}
+
+.tool-recibos .recibos-table .recibo-numero-cell {
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 .tool-recibos .form-group {
@@ -692,13 +758,40 @@
 /* Logotipo da Farmácia no Canto Superior Esquerdo da Moldura */
 .tool-recibos .ws-logo-container {
   position: absolute;
-  top: 20px;
-  left: 22px;
+  top: 9px;
+  left: 13px;
 }
 
 .tool-recibos .ws-logo-container img {
-  width: 46px !important;
-  height: 46px !important;
+  width: 71px !important;
+  height: auto !important;
+}
+
+/* Número do recibo no canto superior direito da moldura (mesma posição do PDF) */
+.tool-recibos .ws-numero {
+  position: absolute;
+  top: 28px;
+  right: 31px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  line-height: 1;
+  text-align: right;
+}
+
+.tool-recibos .ws-numero-label {
+  font-size: 6.5px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: #777777;
+}
+
+.tool-recibos .ws-numero-code {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  color: #111111;
 }
 
 /* Título RECIBO */
