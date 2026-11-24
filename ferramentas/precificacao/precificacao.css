@@ -130,4 +130,8 @@
 .tool-precificacao .section-head:has(.prec-print-opts){ align-items:center; flex-wrap:wrap; gap:10px; }
 .tool-precificacao .prec-print-opts{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; font-size:13px; color:var(--gray-700); }
 .tool-precificacao #precLimite{ margin:0 0 12px; }
-.tool-precificacao .prec-sheet{ background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); overflow-x:auto; }
+.tool-precificacao .prec-folhas{ display:inline-block; margin-left:6px; padding:2px 9px; border-radius:99px; background:var(--sky-bg); color:var(--blue-500); font-size:12px; font-weight:700; vertical-align:1px; }
+/* Na tela, cada folha aparece como um papel (a sombra branca é a margem da impressora). Na impressão nada disso vai. */
+.tool-precificacao .prec-sheet{ background:var(--gray-100); border-radius:var(--radius); box-shadow:var(--shadow); overflow-x:auto; padding:12mm 10mm; gap:18mm; }
+.tool-precificacao .prec-sheet .folha{ margin-inline:auto; box-shadow:0 0 0 var(--fm) #fff, 0 0 0 calc(var(--fm) + 1px) var(--gray-200), 0 10px 24px var(--fm) rgba(13, 27, 48, .08); }
+.tool-precificacao .prec-sheet .empty{ color:var(--gray-500); }

@@ -216,6 +216,43 @@ function contar(linhas){
   return c;
 }
 
+/* ---------- Folhas de impressão ---------- */
+// Medidas em mm. A área útil é o papel menos a margem; "titulo" é a altura do nome da loja no alto do bloco.
+var PAPEIS = {
+  a4:      { nome: 'A4', css: 'A4', largura: 210, altura: 297, margem: 6, titulo: 8 },
+  termica: { nome: '80 × 297 mm', css: '80mm 297mm', largura: 80, altura: 297, margem: 4, titulo: 11 }
+};
+var VAO = 2;           // espaço entre etiquetas
+var ENTRE_GRUPOS = 4;  // espaço antes de uma loja que começa no meio da folha
+var RODAPE = 4;        // faixa do número da folha
+var FOLGA = 1;         // sobra para o arredondamento do navegador não criar folha em branco
+
+// Divide as etiquetas em folhas, do jeito que vão sair na impressora. grupos: [{ titulo, itens }].
+// Cada folha começa com o nome da loja (repetido quando ela continua da folha anterior); a loja
+// seguinte começa na mesma folha só se couberem o nome e pelo menos uma linha de etiquetas.
+function paginar(grupos, lw, lh, papel){
+  var p = PAPEIS[papel] || PAPEIS.a4;
+  var largura = p.largura - 2 * p.margem, altura = p.altura - 2 * p.margem - FOLGA, util = altura - RODAPE;
+  var colunas = Math.max(1, Math.floor((largura + VAO) / (lw + VAO)));
+  function linhasQueCabem(usado){ return Math.max(1, Math.floor((util - usado + VAO) / (lh + VAO))); }
+  var folhas = [], folha = null, usado = 0;
+  grupos.forEach(function(g){
+    var i = 0;
+    while(i < g.itens.length){
+      var antes = folha ? ENTRE_GRUPOS : 0;
+      if(!folha || usado + antes + p.titulo + lh > util){ folha = { blocos: [] }; folhas.push(folha); usado = 0; antes = 0; }
+      usado += antes + p.titulo;
+      var n = Math.min(linhasQueCabem(usado) * colunas, g.itens.length - i);
+      folha.blocos.push({ titulo: g.titulo, total: g.itens.length, continua: i > 0, itens: g.itens.slice(i, i + n) });
+      var linhas = Math.ceil(n / colunas);
+      usado += linhas * lh + (linhas - 1) * VAO;
+      i += n;
+      if(i < g.itens.length) folha = null;
+    }
+  });
+  return { folhas: folhas, colunas: colunas, porFolha: colunas * linhasQueCabem(p.titulo), largura: largura, altura: altura };
+}
+
 /* ======================== INTERFACE ======================== */
 
 var LOGO_URL = 'ferramentas/precificacao/logo_etiqueta.png';
@@ -226,9 +263,14 @@ var JSBARCODE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsB
 var LABEL_CSS = [
   '.prec-sheet{--f-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;--f-body:"Inter",system-ui,Arial,sans-serif;--f-mono:"JetBrains Mono",Consolas,monospace;background:#fff;color:#111;padding:8mm;display:flex;flex-direction:column;gap:6mm}',
   '.prec-sheet *{box-sizing:border-box}',
-  '.prec-sheet .grid{display:grid;gap:2mm;justify-content:start}',
-  '.prec-sheet .grp-h{margin:0 0 2.5mm;font:800 15pt/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em;color:#111;display:flex;align-items:baseline;gap:4mm;border-bottom:1.5px solid #111;padding-bottom:1.5mm}',
-  '.prec-sheet .grp-h span{font:500 8pt/1 var(--f-body);color:#555;text-transform:none;letter-spacing:0}',
+  // Uma folha = a área de impressão do papel; as medidas vêm de paginar(), para a conta e a impressão baterem.
+  '.prec-sheet .folha{position:relative;flex:none;width:var(--fw);height:var(--fh);overflow:hidden;background:#fff}',
+  '.prec-sheet .folha-n{position:absolute;right:0;bottom:0;font:500 6.5pt/1 var(--f-body);color:#99a;letter-spacing:.03em}',
+  '.prec-sheet .grp + .grp{margin-top:' + ENTRE_GRUPOS + 'mm}',
+  '.prec-sheet .grid{display:grid;gap:' + VAO + 'mm;justify-content:start}',
+  '.prec-sheet .grp-h{height:' + (PAPEIS.a4.titulo - 1.5) + 'mm;margin:0 0 1.5mm;font:800 15pt/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em;color:#111;display:flex;align-items:baseline;gap:4mm;border-bottom:1.5px solid #111;padding-bottom:.8mm;white-space:nowrap;overflow:hidden}',
+  '.prec-sheet .grp-t{font:inherit;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}',
+  '.prec-sheet .grp-h span{flex:none;font:500 8pt/1 var(--f-body);color:#555;text-transform:none;letter-spacing:0}',
   '.prec-sheet .empty{padding:30px;text-align:center;color:#555;font:13px var(--f-body)}',
   '.lbl{-webkit-print-color-adjust:exact;print-color-adjust:exact;width:var(--lw);height:var(--lh);border:1px dashed #9aa;border-radius:0;padding:2mm 2.5mm;display:flex;flex-direction:column;overflow:hidden;break-inside:avoid;background:#fff;color:#111}',
   '.lbl .top{display:flex;gap:2mm;align-items:center}',
@@ -253,7 +295,7 @@ var LABEL_CSS = [
   '.lbl.plain .prices{margin-top:auto;margin-bottom:auto}',
   '.lbl.plain .foot{margin-top:0}',
   '.prec-sheet.termica{width:calc(80mm + 16mm)}',
-  '.prec-sheet.termica .grp-h{font-size:12pt;gap:2mm;flex-wrap:wrap}',
+  '.prec-sheet.termica .grp-h{height:' + (PAPEIS.termica.titulo - 1.5) + 'mm;font-size:12pt;flex-direction:column;align-items:flex-start;justify-content:flex-end;gap:.8mm}',
   '.prec-sheet.termica .lbl{border:none;border-bottom:1px dashed #000;border-radius:0}',
   '.prec-sheet.termica .tag,.prec-sheet.termica .off{background:#000}',
   '.prec-sheet.termica .de,.prec-sheet.termica .meta{color:#000}'
@@ -434,7 +476,7 @@ function medidas(){
   var termica = el('precPapel').value === 'termica';
   var lw, lh;
   if(termica){ lw = 72; lh = 32; } else { var m = el('precSize').value.split('x').map(Number); lw = m[0]; lh = m[1]; }
-  return { termica: termica, lw: lw, lh: lh, escala: Math.max(0.6, Math.min(lw / 66, lh / 36, 1.35)) };
+  return { termica: termica, papel: termica ? 'termica' : 'a4', lw: lw, lh: lh, escala: Math.max(0.6, Math.min(lw / 66, lh / 36, 1.35)) };
 }
 
 function htmlEtiqueta(r, i, comBarras){
@@ -490,9 +532,20 @@ function renderEtiquetas(){
       'Clique em uma loja no resumo para imprimir uma de cada vez' + (el('precTipo').value === 'all' ? ', ou troque "Mostrar" para "Todos os alterados" se quer só o que mudou de preço.' : ', ou filtre por classificação.');
   }
   el('precEtiquetas').hidden = !S.linhas.length && !S.manuais.length;
-  sheet.innerHTML = grupos.length ? grupos.map(function(g){
-    return '<section class="grp"><h3 class="grp-h">' + esc(g.titulo) + '<span>' + g.html.length + ' etiqueta' + (g.html.length > 1 ? 's' : '') + '</span></h3>' +
-      '<div class="grid" style="grid-template-columns:repeat(auto-fill,' + md.lw + 'mm)">' + g.html.join('') + '</div></section>';
+  var papel = PAPEIS[md.papel];
+  var pag = paginar(grupos.map(function(g){ return { titulo: g.titulo, itens: g.html }; }), md.lw, md.lh, md.papel);
+  var nFolhas = pag.folhas.length;
+  sheet.style.setProperty('--fw', pag.largura + 'mm');
+  sheet.style.setProperty('--fh', pag.altura + 'mm');
+  sheet.style.setProperty('--fm', papel.margem + 'mm');
+  el('precFolhas').hidden = !nFolhas;
+  el('precFolhas').textContent = nFolhas.toLocaleString('pt-BR') + (nFolhas > 1 ? ' folhas ' : ' folha ') + papel.nome;
+  sheet.innerHTML = nFolhas ? pag.folhas.map(function(f, n){
+    return '<div class="folha">' + f.blocos.map(function(b){
+      return '<section class="grp"><h3 class="grp-h"><b class="grp-t">' + esc(b.titulo) + '</b><span>' + (b.continua ? 'continuação · ' : '') +
+        b.total + ' etiqueta' + (b.total > 1 ? 's' : '') + '</span></h3>' +
+        '<div class="grid" style="grid-template-columns:repeat(' + pag.colunas + ',' + md.lw + 'mm)">' + b.itens.join('') + '</div></section>';
+    }).join('') + '<div class="folha-n">' + (n + 1) + ' / ' + nFolhas + '</div></div>';
   }).join('') : '<div class="empty">Nenhuma etiqueta selecionada.</div>';
   if(comBarras && window.JsBarcode){
     sheet.querySelectorAll('svg[data-code]').forEach(function(s){
@@ -506,8 +559,8 @@ function renderEtiquetas(){
 
 /* ---------- Impressão e arquivos ---------- */
 function imprimir(){
-  var md = medidas(), sheet = el('precSheet');
-  var pagina = md.termica ? '@page{size:80mm 297mm;margin:4mm}' : '@page{size:A4;margin:6mm}';
+  var md = medidas(), sheet = el('precSheet'), papel = PAPEIS[md.papel];
+  var pagina = '@page{size:' + papel.css + ';margin:' + papel.margem + 'mm}';
   var absoluto = location.href.split('#')[0].replace(/[^/]*$/, '') + LOGO_URL;
   var html = sheet.outerHTML.split('src="' + LOGO_URL + '"').join('src="' + (logoDados || absoluto) + '"');
   // Imprime pela própria tela: a folha vai para um quadro invisível, sem abrir outra guia.
@@ -522,7 +575,7 @@ function imprimir(){
   doc.open();
   doc.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(S.dataHoje) + '</title>' +
     '<link rel="stylesheet" href="' + FONTES_URL + '"><style>' + LABEL_CSS + '\nbody{margin:0;background:#fff}\n' + pagina +
-    '\n@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.prec-sheet{padding:0;display:block}.prec-sheet.termica{width:auto}.grp + .grp{margin-top:5mm}}</style></head><body>' +
+    '\n@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.prec-sheet{padding:0;display:block}.prec-sheet.termica{width:auto}.folha{break-after:page}.folha:last-child{break-after:auto}}</style></head><body>' +
     html + '</body></html>');
   doc.close();
   var janela = quadro.contentWindow;

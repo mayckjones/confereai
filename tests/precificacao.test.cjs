@@ -10,7 +10,7 @@ function loadEngine(){
   const context = vm.createContext({ window: {}, console });
   const source = fs.readFileSync(path.join(root, 'ferramentas/precificacao/precificacao.js'), 'utf8');
   const engine = source.slice(0, source.indexOf('/* ======================== INTERFACE'));
-  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar, criarEtiquetaManual }; };', context);
+  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar, criarEtiquetaManual, paginar, PAPEIS }; };', context);
   return context.window.__tool_init_precificacao();
 }
 module.exports = { loadEngine };
@@ -168,4 +168,43 @@ test('etiqueta manual: valida os campos e só aceita preço anterior maior que o
   assert.match(e.criarEtiquetaManual({ descricao: 'X', por: '10', de: '9,99' }).erro, /maior que o preço atual/);
   assert.match(e.criarEtiquetaManual({ descricao: 'X', por: '10', de: 'abc' }).erro, /não é um valor válido/);
   assert.equal(e.criarEtiquetaManual({ descricao: 'X', por: '10', quantidade: 999 }).etiqueta.quantidade, 200);
+});
+
+const itens = (n, p = '') => Array.from({ length: n }, (_, i) => p + i);
+// Os arrays nascem dentro do vm (outro realm); a cópia deixa o deepEqual comparar só os valores.
+const simples = v => JSON.parse(JSON.stringify(v));
+const porFolha = pag => simples(pag.folhas.map(f => f.blocos.reduce((t, b) => t + b.itens.length, 0)));
+
+test('folhas: quantas etiquetas cabem em cada tamanho de papel', () => {
+  const um = (lw, lh, papel) => e.paginar([{ titulo: 'LOJA 1', itens: itens(1) }], lw, lh, papel);
+  assert.equal(um(63.5, 32, 'a4').colunas, 3);
+  assert.equal(um(63.5, 32, 'a4').porFolha, 24, 'média: 3 × 8');
+  assert.equal(um(47, 30, 'a4').porFolha, 32, 'pequena: 4 × 8 (a 9ª linha não cabe no A4)');
+  assert.equal(um(95, 32, 'a4').porFolha, 16, 'grande: 2 × 8');
+  assert.equal(um(72, 32, 'termica').colunas, 1);
+  assert.equal(um(72, 32, 'termica').porFolha, 8);
+  const p = um(63.5, 32, 'a4');
+  assert.equal(p.largura, 198, 'A4 menos 6 mm de margem de cada lado');
+  assert.ok(p.altura < 297 - 12, 'a folha fica um pouco menor que a área útil, para não sobrar folha em branco');
+});
+
+test('folhas: total de folhas e a loja que continua na folha seguinte', () => {
+  const pag = e.paginar([{ titulo: 'LOJA 1', itens: itens(675) }], 63.5, 32, 'a4');
+  assert.equal(pag.folhas.length, 29, '675 etiquetas ÷ 24 por folha');
+  assert.deepEqual(porFolha(pag).slice(0, 2), [24, 24]);
+  assert.equal(porFolha(pag)[28], 675 - 28 * 24);
+  assert.equal(pag.folhas[0].blocos[0].continua, false);
+  assert.equal(pag.folhas[1].blocos[0].continua, true, 'o nome da loja se repete na folha seguinte');
+  assert.equal(pag.folhas[1].blocos[0].total, 675);
+  assert.deepEqual(simples(pag.folhas.flatMap(f => f.blocos.flatMap(b => b.itens))), itens(675), 'nenhuma etiqueta some nem troca de ordem');
+  assert.equal(e.paginar([], 63.5, 32, 'a4').folhas.length, 0);
+});
+
+test('folhas: a loja seguinte só começa na mesma folha se couber pelo menos uma linha', () => {
+  const junta = e.paginar([{ titulo: 'A', itens: itens(3, 'a') }, { titulo: 'B', itens: itens(20, 'b') }], 63.5, 32, 'a4');
+  assert.equal(junta.folhas.length, 2);
+  assert.deepEqual(simples(junta.folhas[0].blocos.map(b => [b.titulo, b.itens.length])), [['A', 3], ['B', 18]], 'perde uma linha para o nome da loja B');
+  assert.deepEqual(simples(junta.folhas[1].blocos.map(b => [b.titulo, b.itens.length, b.continua])), [['B', 2, true]]);
+  const separa = e.paginar([{ titulo: 'A', itens: itens(21, 'a') }, { titulo: 'B', itens: itens(3, 'b') }], 63.5, 32, 'a4');
+  assert.deepEqual(simples(separa.folhas.map(f => f.blocos.map(b => b.titulo))), [['A'], ['B']], 'com 7 linhas de A não cabe o nome de B e mais uma linha');
 });
