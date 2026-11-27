@@ -10,7 +10,7 @@ function loadEngine(){
   const context = vm.createContext({ window: {}, console });
   const source = fs.readFileSync(path.join(root, 'ferramentas/precificacao/precificacao.js'), 'utf8');
   const engine = source.slice(0, source.indexOf('/* ======================== INTERFACE'));
-  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar, criarEtiquetaManual, paginar, PAPEIS }; };', context);
+  vm.runInContext(engine + '\nreturn { LOJA_NOMES, BASE_COLUNAS, chave, brNum, dataHoje, dataIso, eanValido, codigoBarras, nomeEtiqueta, lerBaseCsv, paraMapa, lojasDaBase, baseParaCsv, lerPlanilhaMatriz, lojaPeloNome, detectarLoja, conciliar, atualizarBase, filtrar, contar, criarEtiquetaManual, paginar, PAPEIS, acharDatas, dataNaPlanilha, dataDoArquivo, dataDasEtiquetas }; };', context);
   return context.window.__tool_init_precificacao();
 }
 module.exports = { loadEngine };
@@ -207,4 +207,38 @@ test('folhas: a loja seguinte só começa na mesma folha se couber pelo menos um
   assert.deepEqual(simples(junta.folhas[1].blocos.map(b => [b.titulo, b.itens.length, b.continua])), [['B', 2, true]]);
   const separa = e.paginar([{ titulo: 'A', itens: itens(21, 'a') }, { titulo: 'B', itens: itens(3, 'b') }], 63.5, 32, 'a4');
   assert.deepEqual(simples(separa.folhas.map(f => f.blocos.map(b => b.titulo))), [['A'], ['B']], 'com 7 linhas de A não cabe o nome de B e mais uma linha');
+});
+
+test('data: reconhece datas em vários formatos e ignora datas impossíveis', () => {
+  assert.deepEqual(simples(e.acharDatas('Emitido em 24/11/2026 10:35')), ['24/11/2026']);
+  assert.deepEqual(simples(e.acharDatas('loja 1 5-11-2026.xls')), ['05/11/2026']);
+  assert.deepEqual(simples(e.acharDatas('LOJA1_2026-11-24.xlsx')), ['24/11/2026']);
+  assert.deepEqual(simples(e.acharDatas('loja 1.xls')), []);
+  assert.deepEqual(simples(e.acharDatas('31/02/2026 e 7891000315507')), [], 'dia que não existe e código de barras não viram data');
+});
+
+test('data: escrita na planilha, depois nome do arquivo, depois dia em que foi salva', () => {
+  const matriz = [['Relatório de Produtos', 'Data: 24/11/2026'], CAB, linha('1', '', 'X', 'P', 1, 9.99), linha('2', '', 'VALIDADE 01/01/2030', 'P', 1, 9.99)];
+  assert.equal(e.dataNaPlanilha(matriz), '24/11/2026', 'só olha acima das colunas, não nos produtos');
+  assert.equal(e.dataNaPlanilha([CAB, linha('1', '', 'X 01/01/2030', 'P', 1, 9.99)]), '');
+  const salvo = new Date(2026, 10, 23, 8, 15).getTime();
+  assert.equal(e.dataDoArquivo({ dentro: '24/11/2026', nome: 'loja 25-11-2026.xls', salvo }).data, '24/11/2026');
+  assert.equal(e.dataDoArquivo({ dentro: '', nome: 'loja 25-11-2026.xls', salvo }).origem, 'pela data no nome do arquivo');
+  const pelaGravacao = e.dataDoArquivo({ dentro: '', nome: 'loja 1.xls', salvo });
+  assert.equal(pelaGravacao.data, '23/11/2026');
+  assert.match(pelaGravacao.origem, /salva/);
+  assert.equal(e.dataDoArquivo({ dentro: '', nome: 'loja 1.xls' }), null);
+});
+
+test('data das etiquetas: hoje sem planilha; a das planilhas quando houver; aviso se forem de dias diferentes', () => {
+  const arq = (nome, data, extra = {}) => ({ nome, loja: 1, recs: [1], data: { data, origem: 'pelo dia em que a planilha foi salva' }, ...extra });
+  assert.deepEqual({ ...e.dataDasEtiquetas([], '27/11/2026') }, { data: '27/11/2026', origem: 'data de hoje', aviso: '' });
+  const ontem = e.dataDasEtiquetas([arq('l1.xls', '26/11/2026'), arq('l2.xls', '26/11/2026')], '27/11/2026');
+  assert.equal(ontem.data, '26/11/2026', 'planilhas de ontem imprimem a data de ontem');
+  assert.equal(ontem.aviso, '');
+  const misturado = e.dataDasEtiquetas([arq('l1.xls', '26/11/2026'), arq('l2.xls', '20/11/2026')], '27/11/2026');
+  assert.equal(misturado.data, '26/11/2026', 'usa a mais recente');
+  assert.match(misturado.aviso, /dias diferentes.*l2\.xls.*20\/11\/2026/);
+  const ignorados = e.dataDasEtiquetas([arq('erro.xls', '01/01/2026', { erro: 'x' }), arq('sem-loja.xls', '02/01/2026', { loja: null })], '27/11/2026');
+  assert.equal(ignorados.data, '27/11/2026', 'arquivo com erro ou sem loja não conta');
 });

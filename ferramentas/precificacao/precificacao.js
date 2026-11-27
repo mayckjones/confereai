@@ -97,11 +97,15 @@ function baseParaCsv(mapa, data){
 }
 
 /* ---------- Planilha "Produtos" do Infarma (matriz de linhas × colunas) ---------- */
-function lerPlanilhaMatriz(linhas){
-  var hi = linhas.findIndex(function(r){
+function linhaCabecalho(linhas){
+  return linhas.findIndex(function(r){
     return (r || []).some(function(c){ return String(c).trim() === 'Código'; }) &&
            (r || []).some(function(c){ return /Prc\.?\s*Venda/i.test(String(c)); });
   });
+}
+
+function lerPlanilhaMatriz(linhas){
+  var hi = linhaCabecalho(linhas);
   if(hi < 0) throw new Error('não achei as colunas "Código" e "Prc. Venda". Exporte pela tela Estoque › Produtos › Planilha.');
   var H = linhas[hi].map(function(c){ return String(c).trim(); });
   function col(re){ return H.findIndex(function(h){ return re.test(h); }); }
@@ -122,6 +126,49 @@ function lerPlanilhaMatriz(linhas){
     });
   });
   return recs;
+}
+
+/* ---------- Data das planilhas (vai no rodapé das folhas de etiquetas) ---------- */
+function dataValida(d, m, a){ var x = new Date(a, m - 1, d); return a >= 2000 && a <= 2099 && x.getMonth() === m - 1 && x.getDate() === d; }
+
+// Datas escritas num texto, como dd/mm/aaaa: aceita 24/11/2026, 24-11-2026, 24.11.2026, 24_11_2026 e 2026-11-24.
+function acharDatas(texto){
+  var s = String(texto == null ? '' : texto), achadas = [], m;
+  function guardar(d, mes, a){ if(dataValida(d, mes, a)) achadas.push(String(d).padStart(2, '0') + '/' + String(mes).padStart(2, '0') + '/' + a); }
+  var dma = /(?:^|\D)(\d{1,2})[\/.\-_](\d{1,2})[\/.\-_](\d{4})(?!\d)/g;
+  while((m = dma.exec(s))) guardar(Number(m[1]), Number(m[2]), Number(m[3]));
+  var amd = /(?:^|\D)(\d{4})[\/.\-_](\d{2})[\/.\-_](\d{2})(?!\d)/g;
+  while((m = amd.exec(s))) guardar(Number(m[3]), Number(m[2]), Number(m[1]));
+  return achadas;
+}
+function maisRecente(datas){ return datas.slice().sort(function(a, b){ return dataIso(b).localeCompare(dataIso(a)); })[0] || ''; }
+
+// Data escrita no cabeçalho da planilha (linhas acima das colunas), se o Infarma colocar.
+function dataNaPlanilha(linhas){
+  var hi = linhaCabecalho(linhas), datas = [];
+  linhas.slice(0, Math.max(hi, 0)).forEach(function(r){ (r || []).forEach(function(c){ datas = datas.concat(acharDatas(c)); }); });
+  return maisRecente(datas);
+}
+
+// De qual dia é a planilha: a data escrita nela, a do nome do arquivo ou o dia em que o arquivo foi salvo.
+function dataDoArquivo(f){
+  if(f.dentro) return { data: f.dentro, origem: 'pela data escrita na planilha' };
+  var n = maisRecente(acharDatas(f.nome));
+  if(n) return { data: n, origem: 'pela data no nome do arquivo' };
+  if(f.salvo) return { data: dataHoje(new Date(f.salvo)), origem: 'pelo dia em que a planilha foi salva' };
+  return null;
+}
+
+// Data das etiquetas: a das planilhas usadas (a mais recente, com aviso se forem de dias diferentes); sem planilha, a de hoje.
+function dataDasEtiquetas(arquivos, hoje){
+  var usados = arquivos.filter(function(f){ return !f.erro && f.loja && f.data; });
+  if(!usados.length) return { data: hoje, origem: 'data de hoje', aviso: '' };
+  var datas = [];
+  usados.forEach(function(f){ if(datas.indexOf(f.data.data) < 0) datas.push(f.data.data); });
+  var d = maisRecente(datas), dono = usados.filter(function(f){ return f.data.data === d; })[0];
+  var aviso = datas.length > 1 ? 'As planilhas são de dias diferentes: ' + usados.map(function(f){ return '<b>' + f.nome + '</b> (' + f.data.data + ')'; }).join(', ') +
+    '. As etiquetas saem com ' + d + '. Confira se carregou os arquivos certos.' : '';
+  return { data: d, origem: dono.data.origem, aviso: aviso };
 }
 
 function lojaPeloNome(nome){ var m = /loja\s*0*(\d+)/i.exec(nome || ''); return m ? Number(m[1]) : null; }
@@ -265,7 +312,8 @@ var LABEL_CSS = [
   '.prec-sheet *{box-sizing:border-box}',
   // Uma folha = a área de impressão do papel; as medidas vêm de paginar(), para a conta e a impressão baterem.
   '.prec-sheet .folha{position:relative;flex:none;width:var(--fw);height:var(--fh);overflow:hidden;background:#fff}',
-  '.prec-sheet .folha-n{position:absolute;right:0;bottom:0;font:500 6.5pt/1 var(--f-body);color:#99a;letter-spacing:.03em}',
+  '.prec-sheet .folha-n{position:absolute;right:0;bottom:0;font:500 6.5pt/1 var(--f-body);color:#99a;letter-spacing:.03em;white-space:nowrap}',
+  '.prec-sheet .folha-n .sep{margin:0 1.5mm}',
   '.prec-sheet .grp + .grp{margin-top:' + ENTRE_GRUPOS + 'mm}',
   '.prec-sheet .grid{display:grid;gap:' + VAO + 'mm;justify-content:start}',
   '.prec-sheet .grp-h{height:' + (PAPEIS.a4.titulo - 1.5) + 'mm;margin:0 0 1.5mm;font:800 15pt/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em;color:#111;display:flex;align-items:baseline;gap:4mm;border-bottom:1.5px solid #111;padding-bottom:.8mm;white-space:nowrap;overflow:hidden}',
@@ -306,7 +354,14 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c
 function brl(v){ return v == null || isNaN(v) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function avisar(msg, erro){ if(typeof showToast === 'function') showToast(msg, erro); }
 
-var S = { base: null, baseData: '', arquivos: [], linhas: [], loja: 'todas', fora: new Set(), dataHoje: dataHoje(), classeEscolhida: false, manuais: [] };
+var S = { base: null, baseData: '', arquivos: [], linhas: [], loja: 'todas', fora: new Set(), dataManual: '', classeEscolhida: false, manuais: [] };
+
+// Data que vai nas folhas e nos arquivos baixados: a escolhida à mão, a das planilhas ou a de hoje (conferida na hora).
+function dataAtual(){
+  var info = dataDasEtiquetas(S.arquivos, dataHoje());
+  return S.dataManual ? { data: S.dataManual, origem: 'escolhida à mão', aviso: info.aviso } : info;
+}
+function dataBr(iso){ var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
 
 /* ---------- Recursos externos (fonte da etiqueta e código de barras) ---------- */
 var estiloEtiqueta = document.createElement('style');
@@ -368,7 +423,8 @@ function lerPlanilha(file){
   return file.arrayBuffer().then(function(buf){
     var wb = XLSX.read(buf, { type: 'array' });
     var ws = wb.Sheets[wb.SheetNames[0]];
-    return lerPlanilhaMatriz(XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }));
+    var matriz = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    return { recs: lerPlanilhaMatriz(matriz), dentro: dataNaPlanilha(matriz) };
   });
 }
 
@@ -376,16 +432,17 @@ function aoReceberPlanilhas(arquivos){
   if(!S.base){ el('precStNew').textContent = 'Carregue a base primeiro.'; return; }
   if(typeof showOverlay === 'function') showOverlay('Lendo planilhas…');
   Promise.all(arquivos.map(function(file){
-    return lerPlanilha(file).then(function(recs){
-      var det = detectarLoja(recs, S.base), pelo = lojaPeloNome(file.name);
-      return { nome: file.name, recs: recs, det: det, pelo: pelo, loja: det ? det.loja : pelo };
+    return lerPlanilha(file).then(function(lida){
+      var recs = lida.recs, det = detectarLoja(recs, S.base), pelo = lojaPeloNome(file.name);
+      var data = dataDoArquivo({ dentro: lida.dentro, nome: file.name, salvo: file.lastModified });
+      return { nome: file.name, recs: recs, det: det, pelo: pelo, loja: det ? det.loja : pelo, data: data };
     }).catch(function(e){ return { nome: file.name, erro: e.message, recs: [] }; });
   })).then(function(novos){
     novos.forEach(function(n){
       S.arquivos = S.arquivos.filter(function(f){ return f.nome !== n.nome; });
       S.arquivos.push(n);
     });
-    S.dataHoje = dataHoje(); S.fora.clear();
+    S.dataManual = ''; S.fora.clear();
     renderArquivos(); recalcular();
   }).finally(function(){ if(typeof hideOverlay === 'function') hideOverlay(); });
 }
@@ -424,6 +481,8 @@ function filtrosAtuais(loja){
 function recalcular(){
   var r = conciliar(S.arquivos, S.base);
   S.linhas = r.linhas;
+  var avisoData = dataDasEtiquetas(S.arquivos, dataHoje()).aviso;
+  if(avisoData) r.avisos.push(avisoData);
   el('precWarn').hidden = !r.avisos.length;
   el('precWarn').innerHTML = r.avisos.join('<br>');
   var classes = Array.from(new Set(S.linhas.map(function(x){ return x.classificacao; }).filter(Boolean))).sort();
@@ -540,12 +599,16 @@ function renderEtiquetas(){
   sheet.style.setProperty('--fm', papel.margem + 'mm');
   el('precFolhas').hidden = !nFolhas;
   el('precFolhas').textContent = nFolhas.toLocaleString('pt-BR') + (nFolhas > 1 ? ' folhas ' : ' folha ') + papel.nome;
+  var dt = dataAtual(), outroDia = dt.data !== dataHoje();
+  el('precData').value = dataIso(dt.data);
+  el('precDataOrig').textContent = dt.origem + (outroDia ? ' · não é a data de hoje' : '');
+  el('precDataOrig').classList.toggle('aviso', outroDia);
   sheet.innerHTML = nFolhas ? pag.folhas.map(function(f, n){
     return '<div class="folha">' + f.blocos.map(function(b){
       return '<section class="grp"><h3 class="grp-h"><b class="grp-t">' + esc(b.titulo) + '</b><span>' + (b.continua ? 'continuação · ' : '') +
         b.total + ' etiqueta' + (b.total > 1 ? 's' : '') + '</span></h3>' +
         '<div class="grid" style="grid-template-columns:repeat(' + pag.colunas + ',' + md.lw + 'mm)">' + b.itens.join('') + '</div></section>';
-    }).join('') + '<div class="folha-n">' + (n + 1) + ' / ' + nFolhas + '</div></div>';
+    }).join('') + '<div class="folha-n">' + esc(dt.data) + '<span class="sep">·</span>' + (n + 1) + ' / ' + nFolhas + '</div></div>';
   }).join('') : '<div class="empty">Nenhuma etiqueta selecionada.</div>';
   if(comBarras && window.JsBarcode){
     sheet.querySelectorAll('svg[data-code]').forEach(function(s){
@@ -559,6 +622,7 @@ function renderEtiquetas(){
 
 /* ---------- Impressão e arquivos ---------- */
 function imprimir(){
+  renderEtiquetas(); // confere a data na hora de imprimir (a tela pode ter ficado aberta de um dia para o outro)
   var md = medidas(), sheet = el('precSheet'), papel = PAPEIS[md.papel];
   var pagina = '@page{size:' + papel.css + ';margin:' + papel.margem + 'mm}';
   var absoluto = location.href.split('#')[0].replace(/[^/]*$/, '') + LOGO_URL;
@@ -573,7 +637,7 @@ function imprimir(){
   document.body.appendChild(quadro);
   var doc = quadro.contentWindow.document;
   doc.open();
-  doc.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(S.dataHoje) + '</title>' +
+  doc.write('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Etiquetas ' + esc(dataAtual().data) + '</title>' +
     '<link rel="stylesheet" href="' + FONTES_URL + '"><style>' + LABEL_CSS + '\nbody{margin:0;background:#fff}\n' + pagina +
     '\n@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}.prec-sheet{padding:0;display:block}.prec-sheet.termica{width:auto}.folha{break-after:page}.folha:last-child{break-after:auto}}</style></head><body>' +
     html + '</body></html>');
@@ -606,14 +670,15 @@ function exportarLista(){
     return [r.loja, r.codigo, r.ean, semPontoVirgula(r.descricao), semPontoVirgula(r.classificacao), precoCsv(r.de), precoCsv(r.por),
       r.de ? ((r.por - r.de) / r.de * 100).toFixed(1).replace('.', ',') : '', r.estoque, TIPOS[r.tipo][0]].join(';');
   })).join('\n');
-  baixar('DE_POR_' + (S.loja === 'todas' ? 'TODAS' : 'LOJA' + S.loja) + '_' + dataIso(S.dataHoje) + '.csv', t);
+  baixar('DE_POR_' + (S.loja === 'todas' ? 'TODAS' : 'LOJA' + S.loja) + '_' + dataIso(dataAtual().data) + '.csv', t);
 }
 
 function baixarBase(){
   if(!S.arquivos.some(function(f){ return !f.erro && f.loja; })) return;
   var nova = atualizarBase(S.base, S.arquivos);
-  baixar('BASE_PRECOS_' + dataIso(S.dataHoje) + '.csv', baseParaCsv(nova, S.dataHoje));
-  S.base = nova; S.baseData = S.dataHoje;
+  var data = dataAtual().data;
+  baixar('BASE_PRECOS_' + dataIso(data) + '.csv', baseParaCsv(nova, data));
+  S.base = nova; S.baseData = data;
   mostrarBase('(atualizada com as planilhas de hoje)');
   avisar('Base atualizada. Guarde o arquivo na pasta Bases.');
 }
@@ -693,6 +758,7 @@ el('precClass').addEventListener('change', function(){ S.classeEscolhida = true;
 });
 el('precBusca').addEventListener('input', renderTabela);
 ['precPapel', 'precSize', 'precBarcode', 'precQuais'].forEach(function(id){ el(id).addEventListener('change', renderEtiquetas); });
+el('precData').addEventListener('change', function(){ S.dataManual = dataBr(el('precData').value); renderEtiquetas(); });
 el('precManualForm').addEventListener('submit', adicionarManual);
 el('pmCodigo').addEventListener('change', preencherPeloCodigo);
 el('pmLoja').addEventListener('change', function(){ if(el('pmCodigo').value.trim()) preencherPeloCodigo(); });
